@@ -1,0 +1,28 @@
+# --- WIRTUALNE ŚRODOWISKA (Najważniejsze) ---
+venv/
+.venv/
+env/
+Output/
+
+# --- PLIKI TYMCZASOWE PYTHON ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- KONFIGURACJE SYSTEMOWE ---
+.DS_Store
+Thumbs.db
+
+# --- PLIKI PROJEKTOWE ---
+# Ignorujemy zawartość workspace (generowane przez AI pliki)
+# Ale chcemy zachować sam folder, więc zostawiamy .gitkeep
+workspace/*
+!workspace/.gitkeep
+
+# --- IDE I EDYTORY ---
+.vscode/
+.idea/
+
+# --- ZMIENNE ŚRODOWISKOWE (BEZPIECZEŃSTWO) ---
+.env
