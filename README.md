@@ -11,9 +11,10 @@
 
 **CodeFabric to Twój prywatny zespół deweloperski działający na localhost.**
 Projekt symuluje pracę software house'u, w którym wyspecjalizowane agenty AI (Architekt, Programista, Tester) zarządzane są przez AI Menedżera.
-Zero chmury. 100% prywatności.
 
-[Demo (Wkrótce)] • [Dokumentacja] • [Zgłoś Błąd]
+**Zero chmury. 100% prywatności.**
+
+[Zgłoś Błąd] • [Wiki] • [Roadmapa]
 
 </div>
 
@@ -23,51 +24,32 @@ Zero chmury. 100% prywatności.
 
 CodeFabric to platforma typu **Autonomous Agentic Workflow**, która automatyzuje proces wytwarzania oprogramowania. W odróżnieniu od zwykłych asystentów (jak ChatGPT), CodeFabric nie tylko "rozmawia", ale **fizycznie wykonuje pracę**: planuje strukturę, tworzy pliki, pisze kod i samodzielnie go naprawia.
 
-### Dlaczego CodeFabric?
-* **🔐 Private Cloud on Localhost:** Działa na modelach Open Source (Llama 3, DeepSeek) poprzez Ollama. Żadne dane nie opuszczają Twojego komputera.
+### Kluczowe Wartości
+* **🔐 Private Cloud on Localhost:** Działa na modelach Open Source (DeepSeek/Llama3) via **Ollama**. Idealne dla danych wrażliwych.
 * **🔄 Self-Healing Code:** Dzięki pętlom zwrotnym w LangGraph, system potrafi wykryć błąd w wygenerowanym kodzie i go poprawić bez ingerencji człowieka.
 * **🧠 Menedżer AI:** Nad wszystkim czuwa nadrzędny agent (Supervisor), który dynamicznie przydziela zadania, zapobiegając utknięciu procesu w martwym punkcie.
+* **📚 RAG Context:** Możliwość douczania agenta na własnej dokumentacji (PDF/TXT).
 
 ---
 
-## 🧠 Architektura: Hierarchiczny System Agentów
+## 🗺️ Koncepcja (Mindmap)
 
-Projekt wykorzystuje wzorzec **Supervisor (Nadzorca)**. Centralny Menedżer decyduje, który agent powinien działać w danym momencie.
+Szybki rzut oka na cele i strukturę projektu.
 
 ```mermaid
-stateDiagram-v2
-    %% Style Definitions
-    classDef manager fill:#2d2d2d,stroke:#fff,stroke-width:4px,color:#fff;
-    classDef worker fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#000;
-    classDef user fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
-
-    User_Input: 👤 Użytkownik (Prompt)
-    Final_Output: 🚀 Gotowy Projekt (/workspace)
-    
-    state "🕵️‍♂️ AI PROJECT MANAGER" as Manager:::manager
-    
-    %% Worker Agents
-    state "🧠 Architekt (Planner)" as Planner:::worker
-    state "👨‍💻 Programista (Coder)" as Coder:::worker
-    state "🔎 Tester (Reviewer)" as Reviewer:::worker
-
-    [*] --> User_Input
-    User_Input --> Manager: Nowe zadanie
-
-    %% Workflow
-    Manager --> Planner: 1. Potrzebny plan
-    Planner --> Manager: Strategia gotowa
-
-    Manager --> Coder: 2. Napisz kod
-    Coder --> Manager: Pliki utworzone
-
-    Manager --> Reviewer: 3. Sprawdź jakość
-    Reviewer --> Manager: Raport błędów
-
-    %% Logic Routing
-    state Decyzja <<Choice>>
-    Manager --> Decyzja
-    
-    Decyzja --> Coder: ❌ Błędy (Fix Loop)
-    Decyzja --> Planner: ❌ Zły plan (Re-plan)
-    Decyzja --> Final_Output: ✅ Sukces
+mindmap
+  root((CodeFabric))
+    Cele
+      Prywatność (Localhost)
+      Automatyzacja (End-to-End)
+      Samonaprawianie (Self-Healing)
+    Agenci
+      Supervisor (Manager)
+      Planner (Architekt)
+      Coder (Programista)
+      Reviewer (Tester)
+    Tech Stack
+      LangGraph (Orkiestracja)
+      Ollama (AI Backend)
+      ChromaDB (Pamięć RAG)
+      Streamlit (UI)
