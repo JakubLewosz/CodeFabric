@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage
@@ -16,7 +17,7 @@ VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
 llm = ChatOllama(
     model=MODEL_NAME,
     base_url=OLLAMA_URL,
-    temperature=0.1, # Zmniejszamy temperaturę, żeby był bardziej "robotyczny"
+    temperature=0.3, # Lekko podnosimy, żeby model się nie "zaciął"
     client_kwargs={
         "verify": VERIFY_SSL,
         "headers": {
@@ -26,36 +27,30 @@ llm = ChatOllama(
 )
 
 def parse_and_save_files(ai_response: str):
-    """
-    Wersja ulepszona regexa - bardziej odporna na błędy formatowania AI.
-    """
-    print(f"DEBUG: Otrzymano od AI ({len(ai_response)} znaków):\n{ai_response[:200]}...") # Podgląd w konsoli
-    
-    # Szukamy: ### FILE: nazwa (koniec linii) tresc ### ENDFILE
-    # Flag re.DOTALL sprawia, że kropka łapie też nowe linie
-    # Flag re.IGNORECASE sprawia, że nie ma znaczenia czy AI napisze 'file' czy 'FILE'
+    # Jeśli odpowiedź jest pusta, nie ma sensu parsować
+    if not ai_response:
+        print("BLAD: Otrzymano pusty ciąg znaków od AI.")
+        return []
+
+    # Pattern szuka: ### FILE: nazwa ... ### ENDFILE
     pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
-    
     matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
     
     created_files = []
     
     if not matches:
-        print("DEBUG: Nie znaleziono znaczników ### FILE. Używam fallback.")
-        fallback_name = "raw_code.txt"
-        write_file(fallback_name, ai_response)
-        return [fallback_name]
+        print("DEBUG: Nie wykryto znaczników. Zapisuję raw_code.txt dla bezpieczeństwa.")
+        write_file("raw_code.txt", ai_response)
+        return ["raw_code.txt"]
 
     for filename, content in matches:
         filename = filename.strip()
         content = content.strip()
-        
-        # Usuń ewentualne znaczniki Markdowna (```python ... ```), jeśli AI je dodało wewnątrz bloku
+        # Czyszczenie bloków markdown
         content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
         
-        result = write_file(filename, content)
-        print(f"Log: {result}")
+        write_file(filename, content)
         created_files.append(filename)
         
     return created_files
@@ -63,40 +58,51 @@ def parse_and_save_files(ai_response: str):
 def coder_node(state: AgentState):
     plan = state["plan"]
     
-    # BARDZO SUROWY PROMPT
     sys_msg = SystemMessage(content=f"""
-    Jesteś generatorem plików. NIE JESTEŚ ASYSTENTEM CZATU.
-    Twoim jedynym zadaniem jest wygenerowanie kodu dla plików na podstawie planu.
+    Jesteś generatorem kodu.
+    Zadanie: Napisz kod dla plików z poniższego planu.
     
     PLAN:
     {plan}
     
-    ZASADY KRYTYCZNE:
-    1. NIE pisz żadnego wstępu (np. "Oto kod...").
-    2. NIE pisz żadnego zakończenia.
-    3. Każdy plik musi być objęty specjalnymi znacznikami.
-    
-    FORMAT WYMAGANY (UŻYJ GO DOKŁADNIE):
-    
-    ### FILE: nazwa_pliku.ext
-    TUTAJ_TRESC_PLIKU
+    WYMAGANY FORMAT:
+    ### FILE: nazwa.rozszerzenie
+    TRESC_KODU
     ### ENDFILE
     
-    Przykład:
-    ### FILE: main.py
-    print("Hello")
-    ### ENDFILE
-    
-    Jeśli plan wymaga 3 plików, musisz wygenerować 3 takie bloki.
-    ZACZNIJ OD RAZU OD PIERWSZEGO ZNACZNIKA "### FILE:".
+    Użyj tego formatu dla każdego pliku. Nie dodawaj komentarzy przed ani po.
     """)
     
-    print("--- PROGRAMISTA ROZPOCZYNA PISANIE ---")
-    response = llm.invoke([sys_msg])
+    print(f"--- PROGRAMISTA ROZPOCZYNA PISANIE (Model: {MODEL_NAME}) ---")
     
-    saved_files = parse_and_save_files(response.content)
+    # --- ZMIANA: UŻYWAMY STREAM ZAMIAST INVOKE ---
+    full_response = ""
+    try:
+        # Pobieramy odpowiedź kawałek po kawałku i sklejamy ją
+        for chunk in llm.stream([sys_msg]):
+            content = chunk.content
+            if content:
+                print(content, end="", flush=True) # Wypisuje na żywo w konsoli
+                full_response += content
+                
+        print("\n--- KONIEC GENEROWANIA ---")
+        
+    except Exception as e:
+        print(f"\nBŁĄD PODCZAS GENEROWANIA: {str(e)}")
+        return {
+            "current_files": [],
+            "messages": []
+        }
+
+    # Parsujemy dopiero jak mamy całość
+    saved_files = parse_and_save_files(full_response)
+    
+    # Tworzymy sztuczną wiadomość z pełną treścią, żeby zachować spójność stanu
+    # (ponieważ stream nie zwraca jednego obiektu AIMessage)
+    from langchain_core.messages import AIMessage
+    final_message = AIMessage(content=full_response)
     
     return {
         "current_files": saved_files,
-        "messages": [response]
+        "messages": [final_message]
     }
