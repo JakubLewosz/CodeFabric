@@ -1,59 +1,73 @@
-graph TD
-    %% Style definicje
-    classDef ui fill:#ff9a9e,stroke:#333,stroke-width:2px;
-    classDef ai fill:#a1c4fd,stroke:#333,stroke-width:2px;
-    classDef storage fill:#f6d365,stroke:#333,stroke-width:2px;
-    classDef external fill:#d4fc79,stroke:#333,stroke-width:2px;
+<div align="center">
 
-    %% Węzły
-    User((👤 Użytkownik)):::ui
-    
-    subgraph "Frontend (Streamlit)"
-        UI[Interfejs Czat & Panel Boczny]:::ui
-        Upload[Upload Plików]:::ui
-    end
+# 🏗️ CodeFabric
+### Local AI Software House & Autonomous Agent System
 
-    subgraph "Core Logic (Python/LangChain)"
-        Orchestrator{⚙️ Supervisor Graph}:::ai
-        
-        subgraph "Agenci (Wirtualny Zespół)"
-            Planner[🧠 Agent Architekt\n(Planner)]:::ai
-            Coder[👨‍💻 Agent Programista\n(Coder)]:::ai
-            Reviewer[🕵️ Agent Recenzent\n(QA/Reviewer)]:::ai
-        end
-    end
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-Local_LLM-black?logo=ollama&logoColor=white)
+![LangChain](https://img.shields.io/badge/LangGraph-Orchestration-E10098?logo=langchain&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Frontend-Streamlit-FF4B4B?logo=streamlit&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-    subgraph "Pamięć i Dane (Local Storage)"
-        RAG_DB[(🗄️ ChromaDB\nVector Store)]:::storage
-        FileSystem[📂 File System\n/workspace]:::storage
-    end
+**CodeFabric to Twój prywatny zespół deweloperski działający na localhost.**
+Projekt symuluje pracę software house'u, w którym wyspecjalizowane agenty AI (Architekt, Programista, Tester) zarządzane są przez AI Menedżera.
+Zero chmury. 100% prywatności.
 
-    subgraph "Inference Engine (Localhost)"
-        Ollama[🦙 Ollama Server]:::external
-        LLM_Code[Model: DeepSeek Coder]:::external
-        LLM_Chat[Model: Llama 3]:::external
-    end
+[Demo (Wkrótce)] • [Dokumentacja] • [Zgłoś Błąd]
 
-    %% Połączenia
-    User -->|Prompt / Komenda| UI
-    User -->|Dokumentacja PDF/TXT| Upload
-    Upload -->|Embeddingi| RAG_DB
+</div>
+
+---
+
+## 💡 O Projekcie
+
+CodeFabric to platforma typu **Autonomous Agentic Workflow**, która automatyzuje proces wytwarzania oprogramowania. W odróżnieniu od zwykłych asystentów (jak ChatGPT), CodeFabric nie tylko "rozmawia", ale **fizycznie wykonuje pracę**: planuje strukturę, tworzy pliki, pisze kod i samodzielnie go naprawia.
+
+### Dlaczego CodeFabric?
+* **🔐 Private Cloud on Localhost:** Działa na modelach Open Source (Llama 3, DeepSeek) poprzez Ollama. Żadne dane nie opuszczają Twojego komputera.
+* **🔄 Self-Healing Code:** Dzięki pętlom zwrotnym w LangGraph, system potrafi wykryć błąd w wygenerowanym kodzie i go poprawić bez ingerencji człowieka.
+* **🧠 Menedżer AI:** Nad wszystkim czuwa nadrzędny agent (Supervisor), który dynamicznie przydziela zadania, zapobiegając utknięciu procesu w martwym punkcie.
+
+---
+
+## 🧠 Architektura: Hierarchiczny System Agentów
+
+Projekt wykorzystuje wzorzec **Supervisor (Nadzorca)**. Centralny Menedżer decyduje, który agent powinien działać w danym momencie.
+
+```mermaid
+stateDiagram-v2
+    %% Style Definitions
+    classDef manager fill:#2d2d2d,stroke:#fff,stroke-width:4px,color:#fff;
+    classDef worker fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#000;
+    classDef user fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+
+    User_Input: 👤 Użytkownik (Prompt)
+    Final_Output: 🚀 Gotowy Projekt (/workspace)
     
-    UI <-->|Streaming Response| Orchestrator
+    state "🕵️‍♂️ AI PROJECT MANAGER" as Manager:::manager
     
-    Orchestrator -->|1. Analiza| Planner
-    Orchestrator -->|2. Generowanie| Coder
-    Orchestrator -->|3. Weryfikacja| Reviewer
+    %% Worker Agents
+    state "🧠 Architekt (Planner)" as Planner:::worker
+    state "👨‍💻 Programista (Coder)" as Coder:::worker
+    state "🔎 Tester (Reviewer)" as Reviewer:::worker
+
+    [*] --> User_Input
+    User_Input --> Manager: Nowe zadanie
+
+    %% Workflow
+    Manager --> Planner: 1. Potrzebny plan
+    Planner --> Manager: Strategia gotowa
+
+    Manager --> Coder: 2. Napisz kod
+    Coder --> Manager: Pliki utworzone
+
+    Manager --> Reviewer: 3. Sprawdź jakość
+    Reviewer --> Manager: Raport błędów
+
+    %% Logic Routing
+    state Decyzja <<Choice>>
+    Manager --> Decyzja
     
-    Planner <-->|Kontekst RAG| RAG_DB
-    Planner <-->|Zapytanie| LLM_Chat
-    
-    Coder -->|Zapis kodu| FileSystem
-    Coder <-->|Generowanie kodu| LLM_Code
-    Coder <-->|Odczyt przykładów| RAG_DB
-    
-    Reviewer -->|Odczyt plików| FileSystem
-    Reviewer <-->|Analiza kodu| LLM_Code
-    
-    Ollama --- LLM_Code
-    Ollama --- LLM_Chat
+    Decyzja --> Coder: ❌ Błędy (Fix Loop)
+    Decyzja --> Planner: ❌ Zły plan (Re-plan)
+    Decyzja --> Final_Output: ✅ Sukces
