@@ -6,7 +6,6 @@ from langchain_core.messages import SystemMessage
 from state import AgentState
 from tools.file_ops import write_file
 
-# Ładujemy konfigurację
 load_dotenv()
 
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL")
@@ -14,11 +13,10 @@ OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN")
 MODEL_NAME = os.getenv("MODEL_CODER", "deepseek-coder-v2") 
 VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
 
-# Inicjalizacja modelu
 llm = ChatOllama(
     model=MODEL_NAME,
     base_url=OLLAMA_URL,
-    temperature=0.2,
+    temperature=0.1, # Zmniejszamy temperaturę, żeby był bardziej "robotyczny"
     client_kwargs={
         "verify": VERIFY_SSL,
         "headers": {
@@ -29,29 +27,35 @@ llm = ChatOllama(
 
 def parse_and_save_files(ai_response: str):
     """
-    Funkcja szuka w tekście fragmentów kodu oznaczonych specjalnymi tagami
-    i zapisuje je jako osobne pliki.
+    Wersja ulepszona regexa - bardziej odporna na błędy formatowania AI.
     """
-    # Szukamy wzorca: ### FILE: nazwa_pliku ...treść... ### ENDFILE
-    # Używamy re.DOTALL, żeby kropka łapała też nowe linie
-    pattern = r"### FILE: (.*?)\s(.*?)\s### ENDFILE"
+    print(f"DEBUG: Otrzymano od AI ({len(ai_response)} znaków):\n{ai_response[:200]}...") # Podgląd w konsoli
     
-    matches = re.findall(pattern, ai_response, re.DOTALL)
+    # Szukamy: ### FILE: nazwa (koniec linii) tresc ### ENDFILE
+    # Flag re.DOTALL sprawia, że kropka łapie też nowe linie
+    # Flag re.IGNORECASE sprawia, że nie ma znaczenia czy AI napisze 'file' czy 'FILE'
+    pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
+    
+    matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
     
     created_files = []
     
     if not matches:
-        # Fallback: Jeśli model zapomniał formatu, zapisz wszystko do jednego pliku
-        # żeby nie stracić kodu.
+        print("DEBUG: Nie znaleziono znaczników ### FILE. Używam fallback.")
         fallback_name = "raw_code.txt"
         write_file(fallback_name, ai_response)
         return [fallback_name]
 
     for filename, content in matches:
         filename = filename.strip()
-        # Zapisz plik używając naszego narzędzia
-        result = write_file(filename, content.strip())
-        print(f"Log: {result}") # Logowanie w konsoli dla debugowania
+        content = content.strip()
+        
+        # Usuń ewentualne znaczniki Markdowna (```python ... ```), jeśli AI je dodało wewnątrz bloku
+        content = re.sub(r"^```[a-zA-Z]*\n", "", content)
+        content = re.sub(r"\n```$", "", content)
+        
+        result = write_file(filename, content)
+        print(f"Log: {result}")
         created_files.append(filename)
         
     return created_files
@@ -59,36 +63,37 @@ def parse_and_save_files(ai_response: str):
 def coder_node(state: AgentState):
     plan = state["plan"]
     
-    # NOWY PROMPT: Wymusza na modelu używanie konkretnego formatu
+    # BARDZO SUROWY PROMPT
     sys_msg = SystemMessage(content=f"""
-    Jesteś Senior Developerem. Twoim zadaniem jest napisać kod na podstawie PLANU.
+    Jesteś generatorem plików. NIE JESTEŚ ASYSTENTEM CZATU.
+    Twoim jedynym zadaniem jest wygenerowanie kodu dla plików na podstawie planu.
     
     PLAN:
     {plan}
     
-    INSTRUKCJA FORMATOWANIA (BARDZO WAŻNE):
-    Aby stworzyć pliki, musisz użyć dokładnie tego formatu dla KAŻDEGO pliku:
-
-    ### FILE: nazwa_pliku.rozszerzenie
-    ... tutaj wklej kod tego pliku ...
+    ZASADY KRYTYCZNE:
+    1. NIE pisz żadnego wstępu (np. "Oto kod...").
+    2. NIE pisz żadnego zakończenia.
+    3. Każdy plik musi być objęty specjalnymi znacznikami.
+    
+    FORMAT WYMAGANY (UŻYJ GO DOKŁADNIE):
+    
+    ### FILE: nazwa_pliku.ext
+    TUTAJ_TRESC_PLIKU
     ### ENDFILE
     
     Przykład:
     ### FILE: main.py
-    print("Hello World")
+    print("Hello")
     ### ENDFILE
     
-    ### FILE: styles.css
-    body {{ background: blue; }}
-    ### ENDFILE
-    
-    Napisz kod dla wszystkich plików z planu w jednej wiadomości.
+    Jeśli plan wymaga 3 plików, musisz wygenerować 3 takie bloki.
+    ZACZNIJ OD RAZU OD PIERWSZEGO ZNACZNIKA "### FILE:".
     """)
     
     print("--- PROGRAMISTA ROZPOCZYNA PISANIE ---")
     response = llm.invoke([sys_msg])
     
-    # Używamy naszej nowej funkcji parsującej
     saved_files = parse_and_save_files(response.content)
     
     return {
