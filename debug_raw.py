@@ -1,16 +1,19 @@
 import requests
 import json
 import os
+import urllib3
 from dotenv import load_dotenv
 
+# --- KONFIGURACJA I WYCISZENIE OSTRZEŻEŃ SSL ---
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 load_dotenv()
 
 # Konfiguracja
-URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+URL = os.getenv("OLLAMA_BASE_URL", "https://localhost:11434")
 MODEL = os.getenv("MODEL_CODER", "llama3")
 TOKEN = os.getenv("OLLAMA_TOKEN", "")
 
-print(f"--- TEST BEZPOŚREDNI (RAW HTTP) ---")
+print(f"--- TEST BEZPOŚREDNI (RAW HTTP - NO SSL VERIFY) ---")
 print(f"Cel: {URL}")
 print(f"Model: {MODEL}")
 
@@ -20,12 +23,20 @@ if TOKEN:
 
 payload = {
     "model": MODEL,
-    "messages": [{"role": "user", "content": "Napisz jedno zdanie: Dziala czy nie?"}],
-    "stream": False  # WYŁĄCZAMY STREAMING NA POZIOMIE API
+    "messages": [{"role": "user", "content": "Napisz jedno krotkie zdanie."}],
+    "stream": False 
 }
 
 try:
-    response = requests.post(f"{URL}/api/chat", headers=headers, json=payload, timeout=120)
+    # UWAGA: verify=False wyłącza sprawdzanie certyfikatu
+    response = requests.post(
+        f"{URL}/api/chat", 
+        headers=headers, 
+        json=payload, 
+        timeout=120, 
+        verify=False 
+    )
+    
     print(f"Status Code: {response.status_code}")
     
     if response.status_code == 200:
