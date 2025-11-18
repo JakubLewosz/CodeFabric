@@ -1,21 +1,24 @@
-# Plik: agents/planner.py
 import os
+from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage
 from state import AgentState
 
-# --- KONFIGURACJA POŁĄCZENIA ---
-# Wpisz tutaj swój token i URL (jeśli jest inny niż domyślny)
-OLLAMA_TOKEN = "twoj-tajny-token" 
-OLLAMA_URL = "https://localhost:11434" # Upewnij się, że to https, skoro masz SSL
+# 1. Ładujemy zmienne z pliku .env
+load_dotenv()
+
+# 2. Pobieramy konfigurację
+OLLAMA_URL = os.getenv("OLLAMA_BASE_URL")
+OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN")
+MODEL_NAME = os.getenv("MODEL_CHAT", "llama3") # Domyślnie llama3
+VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
 
 llm = ChatOllama(
-    model="llama3",
+    model=MODEL_NAME,
     base_url=OLLAMA_URL,
     temperature=0,
-    # Tutaj przekazujemy parametry do klienta HTTP (httpx):
     client_kwargs={
-        "verify": False,  # Wyłącza weryfikację certyfikatu SSL (self-signed)
+        "verify": VERIFY_SSL,
         "headers": {
             "Authorization": f"Bearer {OLLAMA_TOKEN}"
         }
@@ -24,22 +27,9 @@ llm = ChatOllama(
 
 def planner_node(state: AgentState):
     messages = state["messages"]
-    
     sys_msg = SystemMessage(content="""
     Jesteś Głównym Architektem Oprogramowania (Tech Lead).
-    Twoim zadaniem jest przeanalizowanie prośby użytkownika i stworzenie precyzyjnego planu implementacji.
-    
-    Twoja odpowiedź musi zawierać:
-    1. Wybór technologii (Python, HTML, etc.).
-    2. Listę plików do utworzenia.
-    3. Krótki opis co ma być w każdym pliku.
-    
-    Nie pisz kodu, tylko PLAN. Bądź zwięzły.
+    Stwórz plan implementacji: technologie, lista plików, opis zawartości.
     """)
-    
     response = llm.invoke([sys_msg] + messages)
-    
-    return {
-        "plan": response.content,
-        "messages": [response]
-    }
+    return {"plan": response.content, "messages": [response]}

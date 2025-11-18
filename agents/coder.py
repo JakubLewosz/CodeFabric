@@ -1,21 +1,23 @@
-# Plik: agents/coder.py
 import os
+from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage
 from state import AgentState
 from tools.file_ops import write_file
 
-# --- KONFIGURACJA POŁĄCZENIA ---
-OLLAMA_TOKEN = "twoj-tajny-token"
-OLLAMA_URL = "https://localhost:11434"
+load_dotenv()
 
-# Używamy DeepSeek Coder z autoryzacją i pominięciem SSL
+OLLAMA_URL = os.getenv("OLLAMA_BASE_URL")
+OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN")
+MODEL_NAME = os.getenv("MODEL_CODER", "deepseek-coder-v2") # Tu używamy modelu kodującego!
+VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
+
 llm = ChatOllama(
-    model="deepseek-coder-v2", # Lub "llama3" jeśli nie masz deepseeka
+    model=MODEL_NAME,
     base_url=OLLAMA_URL,
     temperature=0.2,
     client_kwargs={
-        "verify": False,
+        "verify": VERIFY_SSL,
         "headers": {
             "Authorization": f"Bearer {OLLAMA_TOKEN}"
         }
@@ -24,28 +26,13 @@ llm = ChatOllama(
 
 def coder_node(state: AgentState):
     plan = state["plan"]
-    
     sys_msg = SystemMessage(content=f"""
-    Jesteś Senior Developerem. Twoim zadaniem jest napisać kod na podstawie otrzymanego PLANU.
-    
-    PLAN:
-    {plan}
-    
-    INSTRUKCJE:
-    1. Dla każdego pliku z planu, wygeneruj kompletny, działający kod.
-    2. Twoja odpowiedź musi być sformatowana tak, abym mógł ją łatwo przetworzyć.
-    
-    WAŻNE:
-    Symulujemy pracę. Napisz treść plików, a ja (system) zapiszę je na dysku.
+    Jesteś Senior Developerem. Napisz kod na podstawie PLANU.
+    PLAN: {plan}
     """)
-    
     response = llm.invoke([sys_msg])
     
-    # Symulacja zapisu (dla uproszczenia w MVP)
-    # W pełnej wersji AI powinno wywoływać narzędzie, tutaj robimy to "na sztywno" dla testu
-    write_file("README_AI.md", f"Projekt wygenerowany na podstawie planu:\n{plan}\n\nKod:\n{response.content}")
+    # Symulacja zapisu (MVP)
+    write_file("README_AI.md", f"PLAN:\n{plan}\n\nKOD:\n{response.content}")
     
-    return {
-        "current_files": ["README_AI.md"],
-        "messages": [response]
-    }
+    return {"current_files": ["README_AI.md"], "messages": [response]}
