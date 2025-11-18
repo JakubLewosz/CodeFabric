@@ -35,13 +35,6 @@ echo.
 echo [3/5] Aktualizacja bibliotek (requirements.txt)...
 pip install -r requirements.txt
 
-:: 4. Pobieranie modeli (działa tylko jeśli masz Ollama)
-echo.
-echo [4/5] Upewniam sie, ze masz wymagane modele AI...
-echo    -> Sprawdzam llama3...
-ollama pull llama3
-echo    -> Sprawdzam deepseek-coder-v2...
-ollama pull deepseek-coder-v2
 
 :: 5. Start
 echo.

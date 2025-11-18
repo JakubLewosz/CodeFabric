@@ -1,22 +1,36 @@
+# Plik: agents/manager.py
+import os
 from langchain_ollama import ChatOllama
 from state import AgentState
-from langchain_core.messages import SystemMessage
 
-llm = ChatOllama(model="llama3", format="json", temperature=0)
+# --- KONFIGURACJA POŁĄCZENIA ---
+OLLAMA_TOKEN = "twoj-tajny-token"
+OLLAMA_URL = "https://localhost:11434"
+
+llm = ChatOllama(
+    model="llama3",
+    base_url=OLLAMA_URL,
+    format="json",
+    temperature=0,
+    client_kwargs={
+        "verify": False,
+        "headers": {
+            "Authorization": f"Bearer {OLLAMA_TOKEN}"
+        }
+    }
+)
 
 def manager_node(state: AgentState):
-    messages = state["messages"]
+    # Tutaj logika pozostaje bez zmian, bo jest w Pythonie (if/else)
+    # Ale jeśli w przyszłości użyjesz llm.invoke(), to obiekt llm jest już skonfigurowany.
+    
     plan = state.get("plan")
     files = state.get("current_files")
     
-    # Prosta logika decyzyjna w Pythonie (bardziej niezawodna niż LLM na tym etapie)
-    # 1. Jeśli nie ma planu -> idź do Plannera
     if not plan:
         return {"next_node": "planner"}
     
-    # 2. Jeśli jest plan, ale nie ma plików -> idź do Codera
     if plan and not files:
         return {"next_node": "coder"}
         
-    # 3. Jeśli są pliki -> Koniec
     return {"next_node": "end"}
