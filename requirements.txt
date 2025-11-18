@@ -1,0 +1,9 @@
+langchain
+langchain-community
+langchain-core
+langchain-ollama
+langgraph
+streamlit
+chromadb
+pydantic
+watchdog
