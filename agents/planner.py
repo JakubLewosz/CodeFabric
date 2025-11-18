@@ -30,6 +30,7 @@ def planner_node(state: AgentState):
     sys_msg = SystemMessage(content="""
     Jesteś Głównym Architektem Oprogramowania (Tech Lead).
     Stwórz plan implementacji: technologie, lista plików, opis zawartości.
+    Możesz używać struktury folderów (np. css/style.css, src/main.py).
     """)
     response = llm.invoke([sys_msg] + messages)
     return {"plan": response.content, "messages": [response]}
