@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import time
+import shutil
 from graph.workflow import app
 from langchain_core.messages import HumanMessage
 from tools.file_ops import list_files, read_file
@@ -106,8 +107,26 @@ with st.sidebar:
     else:
         st.info("Folder roboczy jest pusty.", icon="ℹ️")
 
+    # --- NOWOŚĆ: EKSPORT DO ZIP ---
     st.divider()
-    st.caption("v1.0.0 | Powered by LangGraph")
+    st.markdown("#### 📦 Eksport")
+    
+    # Przycisk generowania ZIP
+    if st.button("Przygotuj plik ZIP", use_container_width=True):
+        # Tworzymy archiwum z folderu workspace
+        shutil.make_archive("projekt_codefabric", 'zip', "./workspace")
+        
+        with open("projekt_codefabric.zip", "rb") as fp:
+            st.download_button(
+                label="📥 Pobierz gotowy projekt (.zip)",
+                data=fp,
+                file_name="twoj_projekt.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+
+    st.divider()
+    st.caption("v1.1.0 | Powered by LangGraph")
 
 # --- GŁÓWNY CZAT ---
 
@@ -140,6 +159,12 @@ if user_input:
         
     # 2. Uruchomienie AI
     with st.chat_message("assistant", avatar="🕵️‍♂️"):
+        
+        # --- NOWOŚĆ: PASEK POSTĘPU ---
+        progress_bar = st.progress(0, text="Inicjalizacja AI Team...")
+        step_count = 0
+        total_steps = 5 # Szacowana liczba kroków (Mgr -> Plan -> Mgr -> Code -> Mgr)
+
         # Kontener statusu (wygląda jak logi systemowe)
         status_container = st.status("🚀 Uruchamianie procedury...", expanded=True)
         
@@ -154,19 +179,33 @@ if user_input:
         try:
             # Streamowanie kroków z grafu
             for event in app.stream(initial_state):
+                step_count += 1
+                # Aktualizacja paska postępu (max 95% przed końcem)
+                prog_val = min(step_count / total_steps, 0.95)
+                
                 for node_name, node_state in event.items():
                     # Logi zależne od tego, kto pracuje
                     if node_name == "manager":
+                        progress_bar.progress(prog_val, text="🕵️‍♂️ Manager: Zarządzam zespołem...")
                         status_container.write(f"🕵️‍♂️ **Manager:** Analizuję postępy...")
+                        
                     elif node_name == "planner":
+                        progress_bar.progress(prog_val, text="🧠 Architekt: Projektuję rozwiązanie...")
                         status_container.write(f"🧠 **Architekt:** Tworzę plan techniczny...")
                         # Pokaż plan w ładnym expanderze
                         if "plan" in node_state and node_state["plan"]:
                             with st.expander("📜 Zobacz Plan Projektu", expanded=False):
                                 st.markdown(node_state["plan"])
+                                
                     elif node_name == "coder":
+                        progress_bar.progress(prog_val, text="👨‍💻 Programista: Piszę kod...")
                         status_container.write(f"👨‍💻 **Programista:** Piszę kod i tworzę pliki...")
                         time.sleep(0.5) # Małe opóźnienie dla efektu "pisania"
+            
+            # Sukces - 100% paska
+            progress_bar.progress(1.0, text="✅ Gotowe!")
+            time.sleep(0.5)
+            progress_bar.empty() # Ukryj pasek po zakończeniu
             
             status_container.update(label="✅ Zadanie zakończone sukcesem!", state="complete", expanded=False)
             final_response = "Zrobione! Sprawdź wygenerowane pliki w panelu bocznym po lewej stronie."
