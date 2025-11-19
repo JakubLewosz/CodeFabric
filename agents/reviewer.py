@@ -1,3 +1,6 @@
+import os
+from dotenv import load_dotenv
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage
 from state import AgentState
 from tools.file_ops import read_file
@@ -5,64 +8,62 @@ from tools.llm_factory import get_llm
 
 def reviewer_node(state: AgentState):
     current_files = state.get("current_files", [])
-    
-    # Jeśli nie ma plików, nie ma co sprawdzać
+    revision_count = state.get("revision_count", 0) # Sprawdzamy, która to próba
+
     if not current_files:
+        return {"feedback": "Brak plików.", "messages": []}
+
+    # --- LITOŚĆ DLA PĘTLI ---
+    # Jeśli to już 3 próba (lub więcej), po prostu przepuszczamy kod.
+    # Lepiej oddać użytkownikowi kod z błędami, niż zapętlić program.
+    if revision_count >= 3:
+        print("--- RECENZENT: LIMIT PRÓB. PRZEPUSZCZAM MIMO BŁĘDÓW. ---")
         return {
-            "feedback": "Brak plików do sprawdzenia.",
-            "messages": [AIMessage(content="Brak plików.")]
+            "feedback": "APPROVE (Wymuszone - limit poprawek). Kod może zawierać błędy, sprawdź go ręcznie.",
+            "messages": [AIMessage(content="Wymuszona akceptacja.")]
         }
 
-    # --- CHECKLISTA: CZY JEST DOKUMENTACJA? ---
-    # Sprawdzamy to mechanicznie (Pythonem)
+    # Checklista README (Działa tylko w 1 i 2 próbie)
     has_readme = any("readme.md" in f.lower() for f in current_files)
-    
     if not has_readme:
-        print("--- RECENZENT: BRAK README.MD! ODRZUCAM PROJEKT. ---")
         return {
-            "feedback": "REJECT. Błąd krytyczny: Brakuje pliku README.md. Musisz stworzyć plik README.md z opisem projektu i instrukcją uruchomienia.",
-            "messages": [AIMessage(content="Odrzucono: Brak README.md")]
+            "feedback": "REJECT. Brak README.md.",
+            "messages": [AIMessage(content="Odrzucono: Brak README.")]
         }
 
-    # 1. Pobieramy model z Factory
+    # Inicjalizacja modelu
     model_name = state.get("model_names", {}).get("chat", "mistral:7b")
     llm = get_llm(model_name, temperature=0.1)
 
-    # 2. Przygotowanie treści
+    # Przygotowanie treści
     files_content = ""
     for file in current_files:
         content = read_file(file)
-        # Ograniczamy wielkość
-        files_content += f"\n--- PLIK: {file} ---\n{content[:4000]}\n"
+        files_content += f"\n--- {file} ---\n{content[:3000]}\n" # Mniejszy limit znaków dla szybkości
 
-    print(f"\n--- RECENZENT ({model_name}): ANALIZUJE KOD ---")
+    print(f"\n--- RECENZENT ({model_name}): OCENA (Próba {revision_count + 1}) ---")
 
     msg = HumanMessage(content=f"""
-    Jesteś Senior Code Reviewerem (Testerem).
-    Twoim zadaniem jest sprawdzić kod oraz DOKUMENTACJĘ.
-
-    KOD DO SPRAWDZENIA:
-    {files_content}
-
-    ZASADY OCENY:
-    1. Sprawdź czy kod nie ma błędów składniowych.
-    2. Sprawdź czy README.md zawiera sensowne instrukcje.
+    Jesteś Code Reviewerem.
     
-    DECYZJA:
-    - Jeśli wszystko OK -> napisz tylko: APPROVE
-    - Jeśli są błędy -> napisz: REJECT i wymień w punktach co poprawić.
+    KOD:
+    {files_content}
+    
+    Zadanie:
+    Czy kod wygląda na kompletny (ma strukturę, importy)?
+    
+    ODPOWIEDŹ:
+    - 'APPROVE' jeśli jest OK.
+    - 'REJECT' jeśli są krytyczne błędy składni.
     """)
 
     try:
-        response = llm.invoke([msg])
-        review_result = response.content
-        print(f"-> Werdykt: {review_result[:50]}...")
-    except Exception as e:
-        print(f"BŁĄD RECENZENTA: {e}")
-        review_result = "APPROVE" # Fallback
-        response = AIMessage(content="Auto-Approve (Error)")
+        res = llm.invoke([msg])
+        feedback = res.content
+    except Exception:
+        feedback = "APPROVE"
 
     return {
-        "feedback": review_result,
-        "messages": [response] 
+        "feedback": feedback,
+        "messages": [res]
     }

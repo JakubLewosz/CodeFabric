@@ -5,94 +5,118 @@ from tools.file_ops import write_file, read_file, get_all_file_paths
 from tools.llm_factory import get_llm
 
 def parse_and_save_files(ai_response: str):
+    """Parsuje odpowiedź AI i zapisuje pliki zachowując strukturę katalogów."""
     if not ai_response: return []
+
+    # Regex szuka: ### FILE: nazwa ... ### ENDFILE
     pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
     matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
-    created = []
+    created_files = []
     
-    if not matches and len(ai_response) > 10:
+    # Fallback: Jeśli brak znaczników, ale jest treść -> zapisz jako raw
+    if not matches and len(ai_response.strip()) > 10:
         write_file("raw_code.txt", ai_response)
         return ["raw_code.txt"]
 
-    for fname, content in matches:
-        fname = fname.strip()
-        content = re.sub(r"^```[a-zA-Z]*\n", "", content.strip())
+    for filename, content in matches:
+        filename = filename.strip()
+        content = content.strip()
+        # Usuwanie markdowna (```python)
+        content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
-        write_file(fname, content)
-        print(f"-> Zapisano/Zaktualizowano: {fname}")
-        created.append(fname)
-    return created
+        
+        write_file(filename, content)
+        print(f"-> Zapisano: {filename}")
+        created_files.append(filename)
+        
+    return created_files
 
 def coder_node(state: AgentState):
-    plan = state.get("plan", "")
+    plan = state.get("plan", "Brak planu.")
     feedback = state.get("feedback", "")
-    revisions = state.get("revision_count", 0)
+    current_revisions = state.get("revision_count", 0)
     
-    # --- NOWOŚĆ: KONTEKST KODU (MEMORY) ---
-    # Pobieramy listę plików, które już są na dysku
+    # 1. Pobieranie modelu z factory
+    model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
+    llm = get_llm(model_name, temperature=0.1, num_ctx=16384) # Duży kontekst na czytanie plików
+
+    # 2. KONTEKST (PAMIĘĆ) - Wczytujemy istniejące pliki
     existing_files = get_all_file_paths()
     code_context = ""
-    
     if existing_files:
         print(f"--- PROGRAMISTA: WCZYTUJĘ ISTNIEJĄCY KOD ({len(existing_files)} plików) ---")
         for f in existing_files:
-            # Czytamy treść, żeby dać AI kontekst
             content = read_file(f)
-            # Ograniczamy wielkość pliku do kontekstu (np. 4000 znaków), żeby nie zapchać modelu
-            code_context += f"\n--- TREŚĆ PLIKU: {f} ---\n{content[:4000]}\n"
+            code_context += f"\n--- PLIK: {f} ---\n{content[:4000]}\n"
     else:
         code_context = "Brak istniejących plików (Nowy projekt)."
 
-    model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
-    llm = get_llm(model_name, temperature=0.1, num_ctx=16384) # Większy kontekst na czytanie plików!
-
-    instruction = "Napisz lub zaktualizuj kod na podstawie planu."
+    # 3. LOGIKA LICZNIKA POPRAWEK (KLUCZOWA ZMIANA)
     if feedback and "REJECT" in str(feedback).upper():
-        instruction = f"TO JEST POPRAWKA. Błędy do naprawy:\n{feedback}"
-        revisions += 1
+        new_revision_count = current_revisions + 1 # <--- ZWIĘKSZAMY LICZNIK
+        print(f"--- PROGRAMISTA ({model_name}): POPRAWKI (Próba {new_revision_count}) ---")
+        
+        instruction_prefix = f"""
+        UWAGA: To jest POPRAWKA kodu (Próba {new_revision_count}).
+        Twój poprzedni kod został odrzucony przez testera.
+        
+        LISTA BŁĘDÓW DO NAPRAWIENIA:
+        {feedback}
+        
+        Zadanie: Przepisz kod plików, naprawiając powyższe błędy.
+        """
+    else:
+        new_revision_count = current_revisions # Bez zmian
+        print(f"--- PROGRAMISTA ({model_name}): START ---")
+        instruction_prefix = "Zadanie: Napisz kod na podstawie planu."
 
+    # 4. PROMPT
     msg = HumanMessage(content=f"""
-    {instruction}
+    {instruction_prefix}
     
-    PLAN DZIAŁANIA:
+    PLAN PROJEKTU:
     {plan}
     
     KONTEKST (OBECNY KOD NA DYSKU):
     {code_context}
     
-    ZASADY:
-    1. Jeśli edytujesz plik, musisz przepisać go W CAŁOŚCI ze zmianami.
-    2. Zachowaj strukturę folderów z nagłówków ### FILE.
-    3. Jeśli plik nie wymaga zmian, NIE generuj go ponownie.
+    --- ZASADY KRYTYCZNE ---
+    1. W nagłówku ### FILE: musisz podać PEŁNĄ ŚCIEŻKĘ z planu (łącznie z nazwą folderu głównego).
+    2. Jeśli plik wymaga edycji, przepisz go w całości.
     
-    FORMAT:
-    ### FILE: sciezka/plik.ext
-    NOWA_TRESC
+    FORMAT WYMAGANY (Użyj go dokładnie):
+    ### FILE: folder/plik.ext
+    TRESC_KODU
     ### ENDFILE
+    
+    Nie pisz wstępów. Tylko bloki kodu.
     """)
-
-    print(f"--- PROGRAMISTA ({model_name}): PISZE KOD ---")
     
-    full_res = ""
+    print(f"--- WYSYŁANIE ZAPYTANIA... ---")
+    
+    full_response = ""
     try:
-        res = llm.invoke([msg])
-        full_res = res.content
+        response_obj = llm.invoke([msg])
+        full_response = response_obj.content
     except Exception as e:
-        print(f"BŁĄD LLM: {e}")
-        write_file("error_log.txt", str(e))
+        err = f"BŁĄD KRYTYCZNY LLM: {e}"
+        print(f"\n{err}")
+        write_file("error_log.txt", err)
 
-    saved = parse_and_save_files(full_res)
+    saved_files = parse_and_save_files(full_response)
     
-    # Jeśli Coder nic nie wygenerował (bo np. uznał że nie trzeba zmian),
-    # to i tak musimy zwrócić listę aktualnych plików, żeby Reviewer miał co robić.
-    if not saved:
-        print("--- BRAK ZMIAN W KODZIE ---")
-        # Zwracamy stare pliki jako "current", żeby proces szedł dalej
-        saved = existing_files 
+    # Raport błędu jeśli pusto (żeby manager widział plik)
+    if not saved_files:
+        write_file("error_report.txt", f"Brak plików. Treść:\n{full_response[:500]}")
+        saved_files.append("error_report.txt")
+    
+    # Jeśli Coder nic nie zmienił, zwracamy stare pliki, żeby proces szedł dalej
+    if not saved_files and existing_files:
+        saved_files = existing_files
 
     return {
-        "current_files": saved,
-        "messages": [AIMessage(content=f"Zaktualizowano: {saved}")],
-        "revision_count": revisions,
-        "feedback": None
+        "current_files": saved_files,
+        "messages": [AIMessage(content=f"Pliki gotowe: {saved_files}")],
+        "revision_count": new_revision_count, # <--- ZWRACAMY ZAKTUALIZOWANY LICZNIK
+        "feedback": None # Czyścimy feedback
     }
