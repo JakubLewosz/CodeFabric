@@ -1,15 +1,12 @@
 import os
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage
 from state import AgentState
 from tools.llm_factory import get_llm
 
 def planner_node(state: AgentState):
-    # 1. Pobieramy model wybrany w UI
     model_name = state.get("model_names", {}).get("chat", "mistral:7b")
-    
-    # Używamy fabryki (0 temperatury dla precyzji)
     llm = get_llm(model_name, temperature=0) 
     
     messages = state["messages"]
@@ -17,54 +14,62 @@ def planner_node(state: AgentState):
     current_files = state.get("current_files", [])
     files_context = ", ".join(current_files) if current_files else "BRAK (Pusty folder)"
     
-    # Logika wyboru promptu (Poprawka vs Nowy)
-    if feedback and not state.get("plan_approved"):
-        print(f"--- ARCHITEKT ({model_name}): POPRAWIA PLAN ---")
-        context_msg = f"Użytkownik zgłosił uwagi: {feedback}"
-    else:
-        print(f"--- ARCHITEKT ({model_name}): ANALIZA PROJEKTU ---")
-        context_msg = "Stwórz lub zaktualizuj strukturę plików."
+    # Pobieramy STARY PLAN (żeby go nie zapomnieć)
+    existing_plan = state.get("plan", "")
 
-    # 2. ROZBUDOWANY PROMPT ARCHITEKTA
-    sys_msg = SystemMessage(content=f"""
-    Jesteś Głównym Architektem Oprogramowania (Tech Lead).
-    Twoim zadaniem jest stworzyć PRECYZYJNĄ strukturę plików dla projektu.
-    
-    STAN OBECNY WORKSPACE: [{files_context}]
-    
+    # --- CZĘŚĆ WSPÓLNA PROMPTU (ZASADY) ---
+    tech_requirements = """
     --- WYMAGANIA TECHNOLOGICZNE (KRYTYCZNE) ---
-    Jeśli projekt jest w danym języku, MUSISZ uwzględnić pliki konfiguracyjne:
-    
     1. C# / .NET:
-       - OBOWIĄZKOWO: Plik projektu `.csproj` (np. `MyApp.csproj`).
-       - OBOWIĄZKOWO: `Program.cs` z metodą `static void Main(string[] args)`.
-       - Opcjonalnie: `Startup.cs` (dla starszego .NET Web API).
-       
+       - OBOWIĄZKOWO: Plik `.csproj`.
+       - OBOWIĄZKOWO: `Program.cs` z `Main`.
     2. Python:
-       - `requirements.txt` lub `pyproject.toml`.
-       - `main.py` lub `app.py` jako punkt wejścia.
-       
-    3. Node.js / JavaScript:
-       - `package.json` (z definicją scripts i dependencies).
-       - `index.js` lub `app.js`.
+       - `requirements.txt`, `main.py`.
+    3. Web:
+       - `index.html`, `style.css`, `script.js`.
     
     --- ZASADY OGÓLNE ---
-    1. ZAWSZE twórz folder główny projektu (np. `CalculatorApp/`).
-    2. Wszystkie pliki muszą być wewnątrz tego folderu.
-    3. ZAWSZE dodaj `README.md` z instrukcją:
-       - Jak skompilować (np. `dotnet build`).
-       - Jak uruchomić (np. `dotnet run`).
+    1. ZAWSZE używaj folderu głównego (np. 'MyApp/').
+    2. ZAWSZE dodaj 'README.md'.
+    """
+
+    # --- LOGIKA WYBORU TRYBU ---
+    if feedback and existing_plan:
+        # TRYB POPRAWKI (Maintenance Mode)
+        print(f"--- ARCHITEKT ({model_name}): AKTUALIZACJA ISTNIEJĄCEGO PLANU ---")
+        sys_msg = SystemMessage(content=f"""
+        Jesteś Tech Leadem. Jesteśmy w trakcie projektu.
+        Użytkownik lub Tester zgłosił problemy.
+        
+        POPRZEDNI PLAN PROJEKTU:
+        {existing_plan}
+        
+        UWAGI/BŁĘDY DO NAPRAWIENIA:
+        {feedback}
+        
+        ZADANIE:
+        Zaktualizuj powyższy plan, aby rozwiązać problemy.
+        NIE ZMIENIAJ całej koncepcji. Nie zmieniaj technologii, jeśli nie zostałeś o to poproszony.
+        Zachowaj istniejące pliki, chyba że trzeba je usunąć/zmienić.
+        
+        {tech_requirements}
+        
+        TWOJA ODPOWIEDŹ (TYLKO PLAN):
+        Zwróć poprawioną listę plików i opisów.
+        """)
+    else:
+        # TRYB NOWY PROJEKT
+        print(f"--- ARCHITEKT ({model_name}): TWORZENIE NOWEGO PLANU ---")
+        sys_msg = SystemMessage(content=f"""
+        Jesteś Tech Leadem. Stwórz strukturę nowego projektu.
+        
+        STAN WORKSPACE: [{files_context}]
+        
+        ZADANIE: Stwórz listę plików i opisów.
+        
+        {tech_requirements}
+        """)
     
-    ZADANIE:
-    {context_msg}
-    
-    TWOJA ODPOWIEDŹ (Tylko PLAN, bez kodu):
-    1. Nazwa folderu głównego.
-    2. Lista PEŁNYCH ŚCIEŻEK (np. `MyApp/Program.cs`, `MyApp/MyApp.csproj`).
-    3. Krótki opis zawartości każdego pliku.
-    """)
-    
-    # 3. Wywołanie
     response = llm.invoke([sys_msg] + messages)
     
     return {
