@@ -240,5 +240,5 @@ if st.session_state.get("pipeline_active"):
 
 ### Dlaczego to działa?
 # Dodałem kluczowe sprawdzenie:
-if next_node == "end":
-    should_run_graph = False
+# if next_node == "end":
+#     should_run_graph = False
