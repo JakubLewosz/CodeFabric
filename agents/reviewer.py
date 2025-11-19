@@ -10,7 +10,6 @@ load_dotenv()
 # --- KONFIGURACJA ---
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN", "")
-# Reviewer może używać tego samego modelu co Coder lub Chat (llama3 jest OK do recenzji)
 MODEL_NAME = os.getenv("MODEL_CHAT", "llama3")
 VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
 
@@ -38,12 +37,23 @@ def reviewer_node(state: AgentState):
             "messages": [AIMessage(content="Brak plików.")]
         }
 
+    # --- CHECKLISTA: CZY JEST DOKUMENTACJA? ---
+    # Sprawdzamy to mechanicznie (Pythonem), zanim zapytamy AI.
+    # To jest bardzo skuteczne wymuszenie README.
+    has_readme = any("readme.md" in f.lower() for f in current_files)
+    
+    if not has_readme:
+        print("--- RECENZENT: BRAK README.MD! ODRZUCAM PROJEKT. ---")
+        return {
+            "feedback": "REJECT. Błąd krytyczny: Brakuje pliku README.md. Musisz stworzyć plik README.md z opisem projektu i instrukcją uruchomienia.",
+            "messages": [AIMessage(content="Odrzucono: Brak README.md")]
+        }
+
     # 1. Pobieramy treść plików do analizy
     files_content = ""
     for file in current_files:
         content = read_file(file)
-        # Ograniczamy wielkość (żeby nie zatkać modelu), np. pierwsze 5000 znaków pliku
-        # Jeśli content to string błędu z file_ops, też go dołączamy
+        # Ograniczamy wielkość (żeby nie zatkać modelu)
         files_content += f"\n--- PLIK: {file} ---\n{content[:5000]}\n"
 
     print(f"\n--- RECENZENT ANALIZUJE KOD ({len(current_files)} plików) ---")
@@ -51,16 +61,17 @@ def reviewer_node(state: AgentState):
     # 2. Prompt dla Recenzenta
     msg = HumanMessage(content=f"""
     Jesteś Senior Code Reviewerem (Testerem).
-    Twoim zadaniem jest sprawdzić poniższy kod pod kątem błędów składniowych, logicznych lub brakujących importów.
+    Twoim zadaniem jest sprawdzić poniższy kod oraz DOKUMENTACJĘ.
 
     KOD DO SPRAWDZENIA:
     {files_content}
 
     DECYZJA:
-    Jeśli kod wygląda na poprawny i kompletny, napisz tylko jedno słowo: APPROVE
-    Jeśli są błędy, napisz słowo REJECT, a następnie w punktach wymień co trzeba poprawić.
-
-    Nie pisz kodu poprawkowego, tylko wskaż błędy.
+    1. Sprawdź czy kod nie ma błędów składniowych.
+    2. Sprawdź czy README.md zawiera sensowne instrukcje.
+    
+    Jeśli wszystko jest dobrze -> napisz tylko: APPROVE
+    Jeśli są błędy -> napisz: REJECT i wymień w punktach co poprawić.
     """)
 
     try:
@@ -73,11 +84,9 @@ def reviewer_node(state: AgentState):
         error_msg = f"BŁĄD RECENZENTA: {e}"
         print(error_msg)
         review_result = "APPROVE" 
-        # Tworzymy sztuczną odpowiedź, żeby nie było błędu zmiennej response
         response = AIMessage(content=f"Automatyczna akceptacja (błąd połączenia: {e})")
 
     # 3. Aktualizujemy stan o feedback
-    # Ten feedback trafi do Managera, a potem ew. do Codera
     return {
         "feedback": review_result,
         "messages": [response] 

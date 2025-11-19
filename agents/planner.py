@@ -4,13 +4,12 @@ from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage
 from state import AgentState
 
-# 1. Ładujemy zmienne z pliku .env
 load_dotenv()
 
-# 2. Pobieramy konfigurację
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL")
-OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN")
-MODEL_NAME = os.getenv("MODEL_CHAT", "llama3") # Domyślnie llama3
+# --- KONFIGURACJA ---
+OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN", "")
+MODEL_NAME = os.getenv("MODEL_CHAT", "llama3")
 VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
 
 llm = ChatOllama(
@@ -19,18 +18,37 @@ llm = ChatOllama(
     temperature=0,
     client_kwargs={
         "verify": VERIFY_SSL,
-        "headers": {
-            "Authorization": f"Bearer {OLLAMA_TOKEN}"
-        }
+        "headers": {"Authorization": f"Bearer {OLLAMA_TOKEN}"} if OLLAMA_TOKEN else {}
     }
 )
 
 def planner_node(state: AgentState):
     messages = state["messages"]
+    
+    # NOWY PROMPT DLA PLANISTY
     sys_msg = SystemMessage(content="""
     Jesteś Głównym Architektem Oprogramowania (Tech Lead).
-    Stwórz plan implementacji: technologie, lista plików, opis zawartości.
-    Możesz używać struktury folderów (np. css/style.css, src/main.py).
+    Twoim zadaniem jest przeanalizowanie prośby użytkownika i stworzenie precyzyjnego planu implementacji.
+    
+    TWOJA ODPOWIEDŹ MUSI ZAWIERAĆ:
+    1. Wybór technologii (Python, HTML, etc.).
+    2. Listę wszystkich plików do utworzenia.
+    3. Krótki opis co ma być w każdym pliku.
+    
+    ZASADA OBOWIĄZKOWA:
+    W planie ZAWSZE musisz uwzględnić plik 'README.md'.
+    Plik ten musi zawierać:
+    - Opis projektu.
+    - Instrukcję instalacji (np. pip install ...).
+    - Instrukcję uruchomienia (np. python app.py).
+    
+    Nie pisz kodu, tylko PLAN. Bądź zwięzły.
     """)
+    
+    print("--- ARCHITEKT TWORZY PLAN ---")
     response = llm.invoke([sys_msg] + messages)
-    return {"plan": response.content, "messages": [response]}
+    
+    return {
+        "plan": response.content,
+        "messages": [response]
+    }
