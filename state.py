@@ -2,13 +2,12 @@ from typing import TypedDict, Annotated, List, Dict
 import operator
 
 class AgentState(TypedDict):
-    messages: Annotated[List[str], operator.add]  # Historia czatu
-    next_node: str                                # Decyzja routera
-    plan: str                                     # Plan projektu
-    current_files: List[str]                      # Lista plików
-    revision_count: int                           # Licznik poprawek
-    feedback: str                                 # Uwagi Recenzenta
+    messages: Annotated[List[str], operator.add]
+    next_node: str
+    plan: str
+    current_files: List[str]
+    revision_count: int
+    feedback: str
     
-    # --- NOWE POLE: Konfiguracja Modeli ---
-    # Przechowuje np. {"chat": "bielik2.6:11b", "coder": "qwen3-coder:30b"}
+    # To jest kluczowe dla wyboru modeli w Sidebarze
     model_names: Dict[str, str]
