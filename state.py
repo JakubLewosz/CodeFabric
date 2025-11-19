@@ -1,15 +1,14 @@
-# Plik: state.py
-from typing import TypedDict, Annotated, List
+from typing import TypedDict, Annotated, List, Dict
 import operator
 
 class AgentState(TypedDict):
-    """
-    Współdzielony stan między agentami.
-    Przechowuje historię rozmowy, plan działania i listę plików.
-    """
     messages: Annotated[List[str], operator.add]  # Historia czatu
-    next_node: str                                # Decyzja managera: kto następny?
-    plan: str                                     # Tekstowy plan projektu
-    current_files: List[str]                      # Lista plików stworzonych w /workspace
-    revision_count: int                           # Licznik poprawek (pętla bezpieczeństwa)
-    feedback: str                                 # Uwagi od Reviewera
+    next_node: str                                # Decyzja routera
+    plan: str                                     # Plan projektu
+    current_files: List[str]                      # Lista plików
+    revision_count: int                           # Licznik poprawek
+    feedback: str                                 # Uwagi Recenzenta
+    
+    # --- NOWE POLE: Konfiguracja Modeli ---
+    # Przechowuje np. {"chat": "bielik2.6:11b", "coder": "qwen3-coder:30b"}
+    model_names: Dict[str, str]

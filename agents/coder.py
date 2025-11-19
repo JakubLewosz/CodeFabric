@@ -1,53 +1,32 @@
-import os
 import re
-from dotenv import load_dotenv
-from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, AIMessage
 from state import AgentState
 from tools.file_ops import write_file
-
-load_dotenv()
-
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN", "")
-MODEL_NAME = os.getenv("MODEL_CODER", "llama3")
-VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
-
-print(f"--- INICJALIZACJA PROGRAMISTY ---")
-print(f"Model: {MODEL_NAME} | URL: {OLLAMA_URL}")
-
-llm = ChatOllama(
-    model=MODEL_NAME,
-    base_url=OLLAMA_URL,
-    temperature=0.1,
-    num_ctx=8192,
-    timeout=300.0,
-    client_kwargs={
-        "verify": VERIFY_SSL,
-        "headers": {"Authorization": f"Bearer {OLLAMA_TOKEN}"} if OLLAMA_TOKEN else {}
-    }
-)
+from tools.llm_factory import get_llm
 
 def parse_and_save_files(ai_response: str):
-    """Parsuje odpowiedź AI i zapisuje pliki."""
-    if not ai_response:
-        return []
+    """Parsuje odpowiedź AI i zapisuje pliki zachowując strukturę katalogów."""
+    if not ai_response: return []
 
+    # Regex szuka: ### FILE: nazwa ... ### ENDFILE
     pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
     matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
     created_files = []
-
-    if not matches and len(ai_response.strip()) > 0:
+    
+    # Fallback: Jeśli brak znaczników, ale jest treść -> zapisz jako raw
+    if not matches and len(ai_response.strip()) > 10:
+        print("DEBUG: Brak znaczników ### FILE. Zapisuję raw_code.txt")
         write_file("raw_code.txt", ai_response)
         return ["raw_code.txt"]
 
     for filename, content in matches:
         filename = filename.strip()
         content = content.strip()
+        # Usuwanie markdowna (```python)
         content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
         
-        # write_file automatycznie utworzy strukturę folderów (w tym folder główny)
+        # write_file automatycznie utworzy foldery
         write_file(filename, content)
         print(f"-> Zapisano: {filename}")
         created_files.append(filename)
@@ -59,15 +38,30 @@ def coder_node(state: AgentState):
     feedback = state.get("feedback", "")
     current_revisions = state.get("revision_count", 0)
     
+    # 1. Pobieranie modelu z factory
+    model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
+    # Ustawiamy duży kontekst (8k) i niski temp dla kodu
+    llm = get_llm(model_name, temperature=0.1, num_ctx=8192)
+
+    # 2. Logika Poprawek (Feedback Loop)
     if feedback and "REJECT" in str(feedback).upper():
-        print(f"--- PROGRAMISTA: POPRAWKI (Iteracja {current_revisions + 1}) ---")
-        instruction_prefix = f"TO JEST POPRAWKA. Tester zgłosił błędy:\n{feedback}\nNapraw je."
+        print(f"--- PROGRAMISTA ({model_name}): POPRAWKI (v{current_revisions + 1}) ---")
+        instruction_prefix = f"""
+        UWAGA: To jest POPRAWKA kodu.
+        Twój poprzedni kod został odrzucony przez testera.
+        
+        LISTA BŁĘDÓW DO NAPRAWIENIA:
+        {feedback}
+        
+        Zadanie: Przepisz kod plików, naprawiając powyższe błędy.
+        """
         new_revision_count = current_revisions + 1
     else:
-        print(f"--- PROGRAMISTA: START ---")
-        instruction_prefix = "Napisz kod na podstawie planu."
+        print(f"--- PROGRAMISTA ({model_name}): START ---")
+        instruction_prefix = "Zadanie: Napisz kod plików na podstawie planu od zera."
         new_revision_count = current_revisions
 
+    # 3. AGRESYWNY PROMPT FORMATUJĄCY
     msg = HumanMessage(content=f"""
     {instruction_prefix}
     
@@ -83,29 +77,29 @@ def coder_node(state: AgentState):
     PRZYKŁAD ZŁY:
     ### FILE: main.py
     
-    FORMAT DLA KAŻDEGO PLIKU:
+    FORMAT WYMAGANY (Użyj go dokładnie):
     ### FILE: nazwa_projektu/sciezka/plik.ext
     TRESC_KODU
     ### ENDFILE
     
-    Nie pisz wstępów. Tylko kod.
+    Nie pisz wstępów. Tylko bloki kodu.
     """)
     
     print(f"--- WYSYŁANIE ZAPYTANIA... ---")
     
     full_response = ""
     try:
+        # Używamy invoke dla stabilności
         response_obj = llm.invoke([msg])
         full_response = response_obj.content
-        if not full_response:
-            print("!!! OSTRZEŻENIE: Pusta odpowiedź.")
     except Exception as e:
-        err = f"BŁĄD LLM: {e}"
+        err = f"BŁĄD KRYTYCZNY LLM: {e}"
         print(f"\n{err}")
         write_file("error_log.txt", err)
 
     saved_files = parse_and_save_files(full_response)
     
+    # Raport błędu jeśli pusto
     if not saved_files:
         write_file("error_report.txt", f"Brak plików. Treść:\n{full_response[:500]}")
         saved_files.append("error_report.txt")
@@ -114,5 +108,5 @@ def coder_node(state: AgentState):
         "current_files": saved_files,
         "messages": [AIMessage(content=f"Pliki: {saved_files}")],
         "revision_count": new_revision_count,
-        "feedback": None
+        "feedback": None # Czyścimy feedback
     }

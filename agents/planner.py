@@ -1,31 +1,17 @@
-import os
-from dotenv import load_dotenv
-from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage
 from state import AgentState
-
-load_dotenv()
-
-# --- KONFIGURACJA ---
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_TOKEN = os.getenv("OLLAMA_TOKEN", "")
-MODEL_NAME = os.getenv("MODEL_CHAT", "llama3")
-VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
-
-llm = ChatOllama(
-    model=MODEL_NAME,
-    base_url=OLLAMA_URL,
-    temperature=0,
-    client_kwargs={
-        "verify": VERIFY_SSL,
-        "headers": {"Authorization": f"Bearer {OLLAMA_TOKEN}"} if OLLAMA_TOKEN else {}
-    }
-)
+from tools.llm_factory import get_llm
 
 def planner_node(state: AgentState):
+    # 1. Pobieramy model wybrany w UI (lub domyślny)
+    model_name = state.get("model_names", {}).get("chat", "mistral:7b")
+    
+    # Używamy fabryki (0 temperatury dla precyzji)
+    llm = get_llm(model_name, temperature=0) 
+    
     messages = state["messages"]
     
-    # NOWY PROMPT Z ZASADĄ ROOT FOLDERU
+    # 2. PEŁNY, ROZBUDOWANY PROMPT
     sys_msg = SystemMessage(content="""
     Jesteś Głównym Architektem Oprogramowania (Tech Lead).
     Twoim zadaniem jest stworzyć strukturę plików dla zadanego projektu.
@@ -47,12 +33,14 @@ def planner_node(state: AgentState):
     1. Nazwę wybranego folderu głównego.
     2. Listę pełnych ścieżek (z folderem głównym).
     3. Opis zawartości plików.
-    4. Obowiązkowo plik 'README.md' wewnątrz folderu głównego.
+    4. Obowiązkowo plik 'README.md' wewnątrz folderu głównego z instrukcją uruchomienia.
     
     Nie pisz kodu, tylko PLAN.
     """)
     
-    print("--- ARCHITEKT PLANUJE STRUKTURĘ (ROOT FOLDER) ---")
+    print(f"--- ARCHITEKT ({model_name}): PLANUJE STRUKTURĘ ---")
+    
+    # 3. Wywołanie
     response = llm.invoke([sys_msg] + messages)
     
     return {
