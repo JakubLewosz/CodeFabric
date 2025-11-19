@@ -9,5 +9,9 @@ class AgentState(TypedDict):
     revision_count: int
     feedback: str
     
-    # To jest kluczowe dla wyboru modeli w Sidebarze
+    # --- NOWE POLE ---
+    # Czy użytkownik kliknął "Zatwierdź Plan"?
+    plan_approved: bool
+    
+    # Konfiguracja modeli
     model_names: Dict[str, str]
