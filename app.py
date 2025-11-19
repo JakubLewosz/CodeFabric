@@ -111,11 +111,8 @@ with st.sidebar:
     st.divider()
     st.markdown("#### 📦 Eksport")
     
-    # Przycisk generowania ZIP
     if st.button("Przygotuj plik ZIP", use_container_width=True):
-        # Tworzymy archiwum z folderu workspace
         shutil.make_archive("projekt_codefabric", 'zip', "./workspace")
-        
         with open("projekt_codefabric.zip", "rb") as fp:
             st.download_button(
                 label="📥 Pobierz gotowy projekt (.zip)",
@@ -126,89 +123,100 @@ with st.sidebar:
             )
 
     st.divider()
-    st.caption("v1.1.0 | Powered by LangGraph")
+    st.caption("v1.2.0 | Powered by LangGraph")
 
 # --- GŁÓWNY CZAT ---
 
-# Nagłówek
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("CodeFabric AI")
     st.markdown("Twój autonomiczny zespół deweloperski. Opisz zadanie, a my zajmiemy się resztą.")
 
-# Inicjalizacja historii
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
         {"role": "assistant", "content": "Cześć! Jestem Twoim Project Managerem. Co dzisiaj budujemy?"}
     ]
 
-# Wyświetlanie wiadomości
 for msg in st.session_state["messages"]:
     avatar = "🧑‍💻" if msg["role"] == "user" else "🕵️‍♂️"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
 # --- LOGIKA PRZETWARZANIA ---
-user_input = st.chat_input("Np. Stwórz grę w węża w Pythonie...")
+user_input = st.chat_input("Np. Stwórz prostą stronę HTML z zegarem...")
 
 if user_input:
-    # 1. Dodaj wiadomość użytkownika
     st.session_state["messages"].append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(user_input)
         
-    # 2. Uruchomienie AI
     with st.chat_message("assistant", avatar="🕵️‍♂️"):
-        
-        # --- NOWOŚĆ: PASEK POSTĘPU ---
         progress_bar = st.progress(0, text="Inicjalizacja AI Team...")
         step_count = 0
-        total_steps = 5 # Szacowana liczba kroków (Mgr -> Plan -> Mgr -> Code -> Mgr)
+        # Zwiększamy liczbę kroków, bo doszedł Reviewer i ewentualne poprawki
+        total_steps = 7 
 
-        # Kontener statusu (wygląda jak logi systemowe)
         status_container = st.status("🚀 Uruchamianie procedury...", expanded=True)
         
         initial_state = {
             "messages": [HumanMessage(content=user_input)],
             "current_files": [],
-            "plan": None
+            "plan": None,
+            "feedback": None,
+            "revision_count": 0
         }
         
         final_response = ""
         
         try:
-            # Streamowanie kroków z grafu
             for event in app.stream(initial_state):
                 step_count += 1
-                # Aktualizacja paska postępu (max 95% przed końcem)
                 prog_val = min(step_count / total_steps, 0.95)
                 
                 for node_name, node_state in event.items():
-                    # Logi zależne od tego, kto pracuje
+                    # --- OBSŁUGA WSZYSTKICH AGENTÓW ---
+                    
                     if node_name == "manager":
-                        progress_bar.progress(prog_val, text="🕵️‍♂️ Manager: Zarządzam zespołem...")
-                        status_container.write(f"🕵️‍♂️ **Manager:** Analizuję postępy...")
+                        progress_bar.progress(prog_val, text="🕵️‍♂️ Manager: Koordynuję pracę...")
+                        status_container.write(f"🕵️‍♂️ **Manager:** Analizuję stan projektu...")
                         
                     elif node_name == "planner":
-                        progress_bar.progress(prog_val, text="🧠 Architekt: Projektuję rozwiązanie...")
+                        progress_bar.progress(prog_val, text="🧠 Architekt: Projektuję...")
                         status_container.write(f"🧠 **Architekt:** Tworzę plan techniczny...")
-                        # Pokaż plan w ładnym expanderze
                         if "plan" in node_state and node_state["plan"]:
                             with st.expander("📜 Zobacz Plan Projektu", expanded=False):
                                 st.markdown(node_state["plan"])
                                 
                     elif node_name == "coder":
-                        progress_bar.progress(prog_val, text="👨‍💻 Programista: Piszę kod...")
-                        status_container.write(f"👨‍💻 **Programista:** Piszę kod i tworzę pliki...")
-                        time.sleep(0.5) # Małe opóźnienie dla efektu "pisania"
-            
-            # Sukces - 100% paska
+                        # Sprawdzamy czy to poprawka
+                        rev_count = node_state.get("revision_count", 0)
+                        msg = "Piszę kod..." if rev_count == 0 else f"Wprowadzam poprawki (v{rev_count})..."
+                        
+                        progress_bar.progress(prog_val, text=f"👨‍💻 Programista: {msg}")
+                        status_container.write(f"👨‍💻 **Programista:** {msg}")
+                        time.sleep(0.5)
+
+                    # --- NOWOŚĆ: OBSŁUGA RECENZENTA ---
+                    elif node_name == "reviewer":
+                        progress_bar.progress(prog_val, text="🔎 Recenzent: Sprawdzam jakość...")
+                        status_container.write(f"🔎 **Recenzent:** Analizuję kod pod kątem błędów...")
+                        
+                        if "feedback" in node_state and node_state["feedback"]:
+                            # Pokaż raport w ładnym okienku
+                            with st.expander("📋 Zobacz Raport Jakości", expanded=True):
+                                st.markdown(node_state["feedback"])
+                                if "REJECT" in str(node_state["feedback"]):
+                                    st.error("⚠️ Znaleziono błędy. Kod wraca do poprawki.")
+                                else:
+                                    st.success("✅ Kod zatwierdzony.")
+
+            # Koniec pętli
             progress_bar.progress(1.0, text="✅ Gotowe!")
             time.sleep(0.5)
-            progress_bar.empty() # Ukryj pasek po zakończeniu
+            progress_bar.empty()
             
             status_container.update(label="✅ Zadanie zakończone sukcesem!", state="complete", expanded=False)
-            final_response = "Zrobione! Sprawdź wygenerowane pliki w panelu bocznym po lewej stronie."
+            final_response = "Zrobione! Projekt przeszedł testy i pliki są gotowe."
             
         except Exception as e:
             status_container.update(label="❌ Błąd krytyczny", state="error")
@@ -218,7 +226,6 @@ if user_input:
         st.markdown(final_response)
         st.session_state["messages"].append({"role": "assistant", "content": final_response})
 
-        # Wymuś odświeżenie, żeby pliki pojawiły się w sidebarze
         if "Zrobione" in final_response:
             time.sleep(1)
             st.rerun()

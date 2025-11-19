@@ -1,41 +1,35 @@
-# Plik: graph/workflow.py
 from langgraph.graph import StateGraph, END
 from state import AgentState
 
-# Importujemy nasze "mózgi"
+# Importujemy wszystkich agentów
 from agents.manager import manager_node
 from agents.planner import planner_node
 from agents.coder import coder_node
+from agents.reviewer import reviewer_node  # <--- NOWOŚĆ
 
 def create_graph():
     """Tworzy i kompiluje graf przepływu pracy (workflow)."""
     
-    # 1. Inicjalizacja grafu z naszym modelem stanu
+    # 1. Inicjalizacja grafu
     workflow = StateGraph(AgentState)
     
-    # 2. Dodajemy węzły (Nodes) - czyli naszych pracowników
+    # 2. Dodajemy węzły (Nodes)
     workflow.add_node("manager", manager_node)
     workflow.add_node("planner", planner_node)
     workflow.add_node("coder", coder_node)
+    workflow.add_node("reviewer", reviewer_node) # <--- NOWOŚĆ
     
-    # 3. Ustawiamy punkt startowy
-    # Zawsze zaczynamy od Managera, który oceni sytuację
+    # 3. Punkt startowy
     workflow.set_entry_point("manager")
     
-    # 4. Logika warunkowa (Conditional Edges)
-    # To jest kluczowe: Manager decyduje, gdzie idziemy dalej
+    # 4. Logika warunkowa (Router Managera)
     def router(state: AgentState):
-        # Pobieramy decyzję managera (np. "planner", "coder", "end")
         decision = state["next_node"]
-        
-        # Jeśli manager mówi "end", kończymy pracę
         if decision == "end":
             return END
-        
-        # W przeciwnym razie idziemy do wskazanego agenta
         return decision
 
-    # Dodajemy krawędzie warunkowe wychodzące od Managera
+    # Manager decyduje: Planner, Coder lub Koniec
     workflow.add_conditional_edges(
         "manager",
         router,
@@ -46,12 +40,21 @@ def create_graph():
         }
     )
     
-    # 5. Powrót do Managera
-    # Po wykonaniu pracy Planner i Coder ZAWSZE wracają do Managera na raport
-    workflow.add_edge("planner", "manager")
-    workflow.add_edge("coder", "manager")
+    # 5. Definicja krawędzi (Edges) - PRZEPŁYW PRACY
     
-    # 6. Kompilacja grafu (zamiana w działającą aplikację)
+    # Planista zawsze wraca do Managera z planem
+    workflow.add_edge("planner", "manager")
+    
+    # --- ZMIANA TRASY (PĘTLA JAKOŚCI) ---
+    # Programista NIE wraca do Managera. 
+    # Programista oddaje kod do Recenzenta.
+    workflow.add_edge("coder", "reviewer")
+    
+    # Recenzent ocenia kod i wysyła raport do Managera
+    # Manager wtedy decyduje, czy wrócić do Codera (poprawki), czy zakończyć.
+    workflow.add_edge("reviewer", "manager")
+    
+    # 6. Kompilacja
     return workflow.compile()
 
 # Tworzymy gotową instancję aplikacji
