@@ -14,19 +14,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- DOSTĘPNE MODELE (Z TWOJEJ LISTY) ---
+# --- DOSTĘPNE MODELE ---
 AVAILABLE_MODELS = [
-    "qwen3-coder:30b",       # Najlepszy do kodu
-    "mistral-small3.2:24b",  # Dobry ogólny
-    "gemma3:27b",            # Nowy Google
-    "qwq:32b",               # Reasoning (dobre do planowania)
-    "bielik2.6:11b",         # Polski!
-    "mistral:7b",            # Szybki
-    "llama3.3:70b",          # Potwór (może być wolny)
-    "llama4:16x17b"          # Eksperymentalny?
+    "qwen3-coder:30b", "mistral-small3.2:24b", "gemma3:27b", 
+    "qwq:32b", "bielik2.6:11b", "mistral:7b", "llama3.3:70b"
 ]
 
-# --- CUSTOM CSS (STYLIZACJA) ---
+# --- CSS ---
 def inject_custom_css():
     st.markdown("""
     <style>
@@ -51,33 +45,21 @@ def inject_custom_css():
 
 inject_custom_css()
 
-# --- SIDEBAR (PANEL STEROWANIA) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/artificial-intelligence.png", width=60)
-    st.markdown("### **CodeFabric** \n *Local AI Software House*")
+    st.markdown("### **CodeFabric**")
     st.divider()
     
-    # --- WYBÓR MODELI ---
+    # Wybór modeli
     st.markdown("#### 🧠 Wybór Mózgów")
-    
-    # Domyślnie: Bielik do gadania (bo Polski), Qwen do kodowania
-    selected_chat_model = st.selectbox(
-        "🗣️ Architekt/Manager", 
-        AVAILABLE_MODELS, 
-        index=4 # Bielik
-    )
-    
-    selected_coder_model = st.selectbox(
-        "👨‍💻 Programista", 
-        AVAILABLE_MODELS, 
-        index=0 # Qwen
-    )
-    
+    chat_model = st.selectbox("🗣️ Architekt/Manager", AVAILABLE_MODELS, index=4) # Bielik
+    coder_model = st.selectbox("👨‍💻 Programista", AVAILABLE_MODELS, index=0) # Qwen
     st.divider()
 
-    # --- EKSPLORATOR PLIKÓW ---
-    st.markdown("#### 📂 Workspace Explorer")
-    if st.button("🔄 Odśwież pliki", use_container_width=True):
+    # Eksplorator
+    st.markdown("#### 📂 Pliki")
+    if st.button("🔄 Odśwież", use_container_width=True):
         st.rerun()
 
     files_str = list_files()
@@ -86,38 +68,25 @@ with st.sidebar:
         selected_file = st.selectbox("Podgląd:", file_list, index=None)
         if selected_file:
             content = read_file(selected_file)
-            st.markdown(f"**📄 {selected_file}**")
             st.code(content, language="python", line_numbers=True)
     else:
-        st.info("Folder roboczy jest pusty.", icon="ℹ️")
+        st.info("Pusto.", icon="ℹ️")
 
-    # --- EKSPORT DO ZIP ---
+    # ZIP
     st.divider()
     if st.button("📦 Pobierz ZIP", use_container_width=True):
-        shutil.make_archive("projekt_codefabric", 'zip', "./workspace")
-        with open("projekt_codefabric.zip", "rb") as fp:
-            st.download_button(
-                label="📥 Pobierz (.zip)",
-                data=fp,
-                file_name="projekt.zip",
-                mime="application/zip",
-                use_container_width=True
-            )
-
-    st.divider()
-    st.caption("v2.0.0 | Powered by LangGraph")
+        shutil.make_archive("projekt", 'zip', "./workspace")
+        with open("projekt.zip", "rb") as f:
+            st.download_button("📥 Pobierz", f, "projekt.zip", "application/zip", use_container_width=True)
 
 # --- GŁÓWNY CZAT ---
-
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("CodeFabric AI")
     st.markdown("Twój autonomiczny zespół deweloperski.")
 
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [
-        {"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}
-    ]
+    st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
     st.session_state["pipeline_active"] = False
 
 # Wyświetlanie historii
@@ -126,8 +95,8 @@ for msg in st.session_state["messages"]:
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-# --- INPUT UŻYTKOWNIKA ---
-user_input = st.chat_input("Np. Stwórz kalkulator w Pythonie...")
+# Input użytkownika
+user_input = st.chat_input("Opis projektu...")
 
 if user_input:
     st.session_state["messages"].append({"role": "user", "content": user_input})
@@ -136,129 +105,140 @@ if user_input:
     st.session_state["pipeline_active"] = True
     st.rerun()
 
-# --- SILNIK LANGGRAPH (PROCES GŁÓWNY) ---
+# --- LOGIKA LANGGRAPH ---
 if st.session_state.get("pipeline_active"):
     
-    # 1. Inicjalizacja stanu (tylko na początku procesu)
+    # 1. Inicjalizacja stanu (ładowanie pamięci tylko raz na cykl)
     if "graph_state" not in st.session_state:
-        # Pamięć Projektu: Ładujemy pliki, które już są na dysku
         existing_files = get_all_file_paths()
-        
         st.session_state["graph_state"] = {
             "messages": [HumanMessage(content=st.session_state["messages"][-1]["content"])],
-            "current_files": existing_files, # <-- AI widzi co już jest!
+            "current_files": existing_files,
             "plan": None,
             "plan_approved": False,
             "feedback": None,
             "revision_count": 0,
-            "model_names": {
-                "chat": selected_chat_model,
-                "coder": selected_coder_model
-            }
+            "model_names": {"chat": chat_model, "coder": coder_model}
         }
 
-    status_container = st.status("🚀 AI pracuje...", expanded=True)
-    progress_bar = st.progress(0, text="Inicjalizacja...")
-    
-    # Szacunkowa liczba kroków do paska postępu
-    step_count = 0
-    total_steps = 7 
+    # Placeholder na status i przyciski (zapobiega duplikacji przy odświeżaniu)
+    status_placeholder = st.empty()
+    action_placeholder = st.empty()
     
     current_state = st.session_state["graph_state"]
     
-    try:
-        # Uruchamiamy graf. Dzięki logice w manager.py, graf sam się zatrzyma (zwróci END),
-        # gdy dojdzie do momentu "Czekam na zatwierdzenie planu".
-        for event in app.stream(current_state):
-            step_count += 1
-            prog_val = min(step_count / total_steps, 0.95)
+    # Sprawdzamy czy mamy "zatrzymanie" (Plan gotowy, ale niezatwierdzony)
+    plan = current_state.get("plan")
+    is_approved = current_state.get("plan_approved")
+    has_files = current_state.get("current_files")
+    feedback = current_state.get("feedback")
+
+    # Jeśli są uwagi (feedback), to znaczy że musimy puścić graf dalej (do Plannera), 
+    # więc nie pokazujemy przycisków, tylko uruchamiamy pętlę.
+    should_run_graph = True
+    if plan and not is_approved and not feedback:
+        should_run_graph = False # Zatrzymujemy się, by pokazać przyciski
+
+    # --- URUCHAMIANIE GRAFU ---
+    if should_run_graph:
+        with status_placeholder.container():
+            status = st.status("🚀 AI pracuje...", expanded=True)
+            progress_bar = st.progress(0, text="Start...")
+            step = 0
             
-            for node_name, new_state in event.items():
-                # Aktualizujemy stan w sesji Streamlit na bieżąco
-                st.session_state["graph_state"].update(new_state)
-                current_state = st.session_state["graph_state"]
-                
-                if node_name == "manager":
-                    progress_bar.progress(prog_val, text="🕵️‍♂️ Manager: Koordynuję...")
-                    status_container.write(f"🕵️‍♂️ **Manager:** Analiza stanu...")
+            try:
+                for event in app.stream(current_state):
+                    step += 1
+                    prog = min(step / 8, 0.95)
                     
-                elif node_name == "planner":
-                    progress_bar.progress(prog_val, text="🧠 Architekt: Projektuję...")
-                    status_container.write(f"🧠 **Architekt:** Tworzę plan techniczny...")
-                    if "plan" in new_state and new_state["plan"]:
-                        with st.expander("📜 Zobacz Wstępny Plan", expanded=False):
-                            st.markdown(new_state["plan"])
+                    for node, new_state in event.items():
+                        # Aktualizacja stanu sesji
+                        st.session_state["graph_state"].update(new_state)
+                        current_state = st.session_state["graph_state"]
+                        
+                        if node == "planner":
+                            progress_bar.progress(prog, "🧠 Architekt: Planuję...")
+                            status.write("🧠 **Architekt:** Tworzę/Poprawiam plan...")
+                            if "plan" in new_state:
+                                with st.expander("📜 Zobacz Plan", expanded=False):
+                                    st.markdown(new_state["plan"])
+                                    
+                        elif node == "coder":
+                            rev = new_state.get("revision_count", 0)
+                            msg = "Piszę kod..." if rev == 0 else f"Poprawki (v{rev})..."
+                            progress_bar.progress(prog, f"👨‍💻 {msg}")
+                            status.write(f"👨‍💻 **Programista:** {msg}")
+                            time.sleep(0.2)
                             
-                elif node_name == "coder":
-                    rev = new_state.get("revision_count", 0)
-                    msg = "Piszę kod..." if rev == 0 else f"Wprowadzam poprawki (v{rev})..."
-                    progress_bar.progress(prog_val, text=f"👨‍💻 Programista: {msg}")
-                    status_container.write(f"👨‍💻 **Programista:** {msg}")
-                    time.sleep(0.5)
+                        elif node == "reviewer":
+                            progress_bar.progress(prog, "🔎 Recenzent: Sprawdzam...")
+                            status.write("🔎 **Recenzent:** Weryfikacja jakości...")
+                            if "feedback" in new_state:
+                                with st.expander("📋 Raport", expanded=True):
+                                    st.markdown(new_state["feedback"])
+                
+                status.update(label="Etap zakończony", state="running", expanded=False)
+                progress_bar.empty()
+                
+                # Po zakończeniu pętli - wymuszamy odświeżenie, żeby sprawdzić warunki UI
+                st.rerun()
 
-                elif node_name == "reviewer":
-                    progress_bar.progress(prog_val, text="🔎 Recenzent: Sprawdzam...")
-                    status_container.write(f"🔎 **Recenzent:** Analiza jakości i dokumentacji...")
-                    if "feedback" in new_state:
-                        with st.expander("📋 Raport Testera", expanded=True):
-                            st.markdown(new_state["feedback"])
+            except Exception as e:
+                status.update(label="Błąd", state="error")
+                st.error(f"Błąd: {e}")
+                st.session_state["pipeline_active"] = False
 
-        # --- PO ZAKOŃCZENIU STRUMIENIOWANIA SPRAWDZAMY STAN ---
-        
-        plan = current_state.get("plan")
-        is_approved = current_state.get("plan_approved")
-        files_created = current_state.get("current_files")
 
-        status_container.update(label="Oczekiwanie na decyzję...", state="running")
-
-        # SCENARIUSZ A: Mamy plan, ale nie jest zatwierdzony -> HUMAN IN THE LOOP
-        if plan and not is_approved:
-            status_container.update(label="🛑 Wymagana akcja człowieka", state="error")
-            progress_bar.empty()
-            
-            st.info("🧠 **Architekt przedstawił plan.** Sprawdź go poniżej i zdecyduj.")
-            
-            with st.expander("📜 PEŁNY PLAN PROJEKTU", expanded=True):
+    # --- INTERFEJS DECYZJI (POZA PĘTLĄ GRAFU) ---
+    # To się wykona tylko gdy graf się zatrzymał (zwrócił END)
+    
+    # Odświeżamy zmienne po przebiegu grafu
+    plan = st.session_state["graph_state"].get("plan")
+    is_approved = st.session_state["graph_state"].get("plan_approved")
+    has_files = st.session_state["graph_state"].get("current_files") # Czy doszły nowe pliki w tej sesji?
+    
+    # Scenariusz A: Czekamy na akceptację planu
+    if plan and not is_approved:
+        with action_placeholder.container():
+            st.info("🧠 **Architekt przygotował plan.**")
+            with st.expander("📜 ZOBACZ PLAN I ZATWIERDŹ", expanded=True):
                 st.markdown(plan)
             
-            col1, col2 = st.columns(2)
-            
-            # Przycisk 1: Zatwierdź
-            if col1.button("✅ Zatwierdź Plan i Koduj", type="primary", use_container_width=True):
+            c1, c2 = st.columns(2)
+            # WAŻNE: key zapobiega duplikacji ID
+            if c1.button("✅ Zatwierdź i Koduj", type="primary", use_container_width=True, key="btn_approve"):
                 st.session_state["graph_state"]["plan_approved"] = True
-                st.session_state["graph_state"]["feedback"] = None 
-                st.rerun() # Restartujemy, Manager puści teraz Codera
+                st.session_state["graph_state"]["feedback"] = None
+                st.rerun()
             
-            # Przycisk 2: Popraw
-            with col2:
-                user_feedback = st.text_input("Lub zgłoś uwagi:", placeholder="Np. Dodaj plik requirements.txt...")
-                if st.button("❌ Popraw Plan", use_container_width=True):
+            with c2:
+                user_feedback = st.text_input("Uwagi do planu:", key="input_feedback")
+                if st.button("❌ Popraw Plan", use_container_width=True, key="btn_reject"):
                     if user_feedback:
                         st.session_state["graph_state"]["feedback"] = user_feedback
-                        st.rerun() # Restartujemy, Manager wyśle do Plannera
+                        st.rerun()
                     else:
-                        st.warning("Wpisz treść uwag.")
+                        st.warning("Wpisz uwagi.")
 
-        # SCENARIUSZ B: Proces zakończony sukcesem (pliki są gotowe i zatwierdzone)
-        # Sprawdzamy też czy Manager nie zakończył procesu przedwcześnie (np. błąd pętli)
-        elif is_approved and files_created:
-            status_container.update(label="✅ Zadanie zakończone!", state="complete")
-            progress_bar.progress(1.0, text="✅ Gotowe!")
-            time.sleep(0.5)
-            progress_bar.empty()
-            
-            final_msg = "Projekt gotowy! Pliki znajdziesz w panelu bocznym."
-            st.markdown(final_msg)
-            st.session_state["messages"].append({"role": "assistant", "content": final_msg})
-            
-            # Sprzątamy sesję grafu, żeby można było zacząć nowy projekt
-            del st.session_state["graph_state"] 
-            st.session_state["pipeline_active"] = False
-            
-            # Odświeżamy UI, żeby pokazać nowe pliki w sidebarze
-            time.sleep(2)
-            st.rerun()
-
-    except Exception as e:
-        status_container.update(label="❌ Błąd krytyczny", state="error")
-        st.error(f"Wystąpił błąd: {str(e)}")
+    # Scenariusz B: Sukces (Plan zatwierdzony i mamy pliki wynikowe)
+    # Używamy len(current_files) > len(start_files) lub po prostu sprawdzamy czy Coder skończył
+    elif is_approved and has_files:
+        # Sprawdzamy czy nie ma REJECT w feedbacku (czyli czy proces zakończył się sukcesem)
+        last_feedback = st.session_state["graph_state"].get("feedback", "")
+        
+        if not last_feedback or "APPROVE" in str(last_feedback):
+            with action_placeholder.container():
+                st.success("✅ **Projekt gotowy!** Pliki znajdziesz w panelu bocznym.")
+                if st.button("Zakończ i zacznij nowy", key="btn_finish"):
+                    final_msg = "Zadanie wykonane pomyślnie."
+                    st.session_state["messages"].append({"role": "assistant", "content": final_msg})
+                    del st.session_state["graph_state"]
+                    st.session_state["pipeline_active"] = False
+                    st.rerun()
+        else:
+            # Jeśli proces się skończył, ale feedback jest REJECT (np. limit poprawek)
+            st.error("⚠️ Proces zakończony, ale mogą występować błędy (limit poprawek).")
+            if st.button("Reset", key="btn_reset_err"):
+                del st.session_state["graph_state"]
+                st.session_state["pipeline_active"] = False
+                st.rerun()
