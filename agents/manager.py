@@ -1,5 +1,9 @@
 import os
+from dotenv import load_dotenv
+from langchain_ollama import ChatOllama
 from state import AgentState
+
+load_dotenv()
 
 def manager_node(state: AgentState):
     plan = state.get("plan")
@@ -8,32 +12,32 @@ def manager_node(state: AgentState):
     revision_count = state.get("revision_count", 0)
     plan_approved = state.get("plan_approved", False)
 
-    # 1. Bezpiecznik (Limit poprawek)
+    # 1. Bezpiecznik
     if revision_count > 3:
+        print("🛑 MANAGER: Limit poprawek.")
         return {"next_node": "end"}
 
     # 2. Brak planu -> Planner
     if not plan:
         return {"next_node": "planner"}
 
-    # 3. Czekanie na zatwierdzenie planu (UI)
+    # 3. Czekanie na zatwierdzenie (UI)
     if plan and not plan_approved:
-        if feedback: return {"next_node": "planner"} # Poprawki planu
-        return {"next_node": "end"} # Stop dla UI
+        if feedback: return {"next_node": "planner"}
+        return {"next_node": "end"} 
 
-    # 4. Plan OK, brak plików -> Coder
-    if plan and plan_approved and not files:
+    # 4. START KODOWANIA (POPRAWIONA LOGIKA)
+    # Jeśli plan jest zatwierdzony, a nie ma jeszcze recenzji (feedback jest pusty),
+    # to znaczy, że musimy uruchomić Programistę.
+    # Ignorujemy fakt istnienia plików (mogą być stare).
+    if plan and plan_approved and not feedback:
         return {"next_node": "coder"}
 
-    # 5. Pętla jakości (Reviewer)
+    # 5. Pętla Jakości
     if files and feedback:
         if "APPROVE" in str(feedback).upper():
-            # SUKCES - KONIEC
             return {"next_node": "end"}
-        
         elif "REJECT" in str(feedback).upper():
-            # POPRAWKI - DO KODERA
             return {"next_node": "coder"}
-            
-    # Domyślny koniec
+
     return {"next_node": "end"}
