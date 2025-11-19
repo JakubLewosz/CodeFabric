@@ -51,13 +51,11 @@ with st.sidebar:
     st.markdown("### **CodeFabric**")
     st.divider()
     
-    # Wybór modeli
     st.markdown("#### 🧠 Wybór Mózgów")
-    chat_model = st.selectbox("🗣️ Architekt/Manager", AVAILABLE_MODELS, index=4) # Bielik
-    coder_model = st.selectbox("👨‍💻 Programista", AVAILABLE_MODELS, index=0) # Qwen
+    chat_model = st.selectbox("🗣️ Architekt/Manager", AVAILABLE_MODELS, index=4) 
+    coder_model = st.selectbox("👨‍💻 Programista", AVAILABLE_MODELS, index=0) 
     st.divider()
 
-    # Eksplorator
     st.markdown("#### 📂 Pliki")
     if st.button("🔄 Odśwież", use_container_width=True):
         st.rerun()
@@ -72,7 +70,6 @@ with st.sidebar:
     else:
         st.info("Pusto.", icon="ℹ️")
 
-    # ZIP
     st.divider()
     if st.button("📦 Pobierz ZIP", use_container_width=True):
         shutil.make_archive("projekt", 'zip', "./workspace")
@@ -89,13 +86,11 @@ if "messages" not in st.session_state:
     st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
     st.session_state["pipeline_active"] = False
 
-# Wyświetlanie historii
 for msg in st.session_state["messages"]:
     avatar = "🧑‍💻" if msg["role"] == "user" else "🕵️‍♂️"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-# Input użytkownika
 user_input = st.chat_input("Opis projektu...")
 
 if user_input:
@@ -108,7 +103,6 @@ if user_input:
 # --- LOGIKA LANGGRAPH ---
 if st.session_state.get("pipeline_active"):
     
-    # 1. Inicjalizacja stanu (ładowanie pamięci tylko raz na cykl)
     if "graph_state" not in st.session_state:
         existing_files = get_all_file_paths()
         st.session_state["graph_state"] = {
@@ -118,26 +112,35 @@ if st.session_state.get("pipeline_active"):
             "plan_approved": False,
             "feedback": None,
             "revision_count": 0,
+            "next_node": "manager", # Startujemy od managera
             "model_names": {"chat": chat_model, "coder": coder_model}
         }
 
-    # Placeholder na status i przyciski (zapobiega duplikacji przy odświeżaniu)
     status_placeholder = st.empty()
     action_placeholder = st.empty()
     
     current_state = st.session_state["graph_state"]
     
-    # Sprawdzamy czy mamy "zatrzymanie" (Plan gotowy, ale niezatwierdzony)
     plan = current_state.get("plan")
     is_approved = current_state.get("plan_approved")
     has_files = current_state.get("current_files")
     feedback = current_state.get("feedback")
+    next_node = current_state.get("next_node")
 
-    # Jeśli są uwagi (feedback), to znaczy że musimy puścić graf dalej (do Plannera), 
-    # więc nie pokazujemy przycisków, tylko uruchamiamy pętlę.
+    # --- DECYZJA: CZY URUCHAMIAĆ GRAF? ---
     should_run_graph = True
+    
+    # 1. Stop jeśli czekamy na zatwierdzenie planu
     if plan and not is_approved and not feedback:
-        should_run_graph = False # Zatrzymujemy się, by pokazać przyciski
+        should_run_graph = False 
+
+    # 2. Stop jeśli proces ZAKOŃCZONY (Kluczowa poprawka)
+    if next_node == "end":
+        should_run_graph = False
+        
+    # 3. Dodatkowe zabezpieczenie: jeśli feedback to APPROVE, też nie uruchamiaj
+    if feedback and "APPROVE" in str(feedback).upper():
+        should_run_graph = False
 
     # --- URUCHAMIANIE GRAFU ---
     if should_run_graph:
@@ -152,7 +155,6 @@ if st.session_state.get("pipeline_active"):
                     prog = min(step / 8, 0.95)
                     
                     for node, new_state in event.items():
-                        # Aktualizacja stanu sesji
                         st.session_state["graph_state"].update(new_state)
                         current_state = st.session_state["graph_state"]
                         
@@ -179,8 +181,6 @@ if st.session_state.get("pipeline_active"):
                 
                 status.update(label="Etap zakończony", state="running", expanded=False)
                 progress_bar.empty()
-                
-                # Po zakończeniu pętli - wymuszamy odświeżenie, żeby sprawdzić warunki UI
                 st.rerun()
 
             except Exception as e:
@@ -188,15 +188,14 @@ if st.session_state.get("pipeline_active"):
                 st.error(f"Błąd: {e}")
                 st.session_state["pipeline_active"] = False
 
-
-    # --- INTERFEJS DECYZJI (POZA PĘTLĄ GRAFU) ---
-    # To się wykona tylko gdy graf się zatrzymał (zwrócił END)
+    # --- INTERFEJS DECYZJI / SUKCESU ---
     
-    # Odświeżamy zmienne po przebiegu grafu
+    # Odświeżamy stan po grafie
     plan = st.session_state["graph_state"].get("plan")
     is_approved = st.session_state["graph_state"].get("plan_approved")
-    has_files = st.session_state["graph_state"].get("current_files") # Czy doszły nowe pliki w tej sesji?
-    
+    next_node = st.session_state["graph_state"].get("next_node")
+    last_feedback = st.session_state["graph_state"].get("feedback", "")
+
     # Scenariusz A: Czekamy na akceptację planu
     if plan and not is_approved:
         with action_placeholder.container():
@@ -205,7 +204,6 @@ if st.session_state.get("pipeline_active"):
                 st.markdown(plan)
             
             c1, c2 = st.columns(2)
-            # WAŻNE: key zapobiega duplikacji ID
             if c1.button("✅ Zatwierdź i Koduj", type="primary", use_container_width=True, key="btn_approve"):
                 st.session_state["graph_state"]["plan_approved"] = True
                 st.session_state["graph_state"]["feedback"] = None
@@ -220,13 +218,10 @@ if st.session_state.get("pipeline_active"):
                     else:
                         st.warning("Wpisz uwagi.")
 
-    # Scenariusz B: Sukces (Plan zatwierdzony i mamy pliki wynikowe)
-    # Używamy len(current_files) > len(start_files) lub po prostu sprawdzamy czy Coder skończył
-    elif is_approved and has_files:
-        # Sprawdzamy czy nie ma REJECT w feedbacku (czyli czy proces zakończył się sukcesem)
-        last_feedback = st.session_state["graph_state"].get("feedback", "")
-        
-        if not last_feedback or "APPROVE" in str(last_feedback):
+    # Scenariusz B: Sukces (Graf zakończył pracę)
+    elif next_node == "end":
+        # Jeśli proces się skończył i nie ma REJECT (lub jest APPROVE)
+        if not last_feedback or "APPROVE" in str(last_feedback).upper() or "LIMIT" in str(last_feedback).upper():
             with action_placeholder.container():
                 st.success("✅ **Projekt gotowy!** Pliki znajdziesz w panelu bocznym.")
                 if st.button("Zakończ i zacznij nowy", key="btn_finish"):
@@ -236,9 +231,14 @@ if st.session_state.get("pipeline_active"):
                     st.session_state["pipeline_active"] = False
                     st.rerun()
         else:
-            # Jeśli proces się skończył, ale feedback jest REJECT (np. limit poprawek)
-            st.error("⚠️ Proces zakończony, ale mogą występować błędy (limit poprawek).")
+            # Jeśli proces się skończył, ale feedback jest negatywny (awaryjnie)
+            st.warning("⚠️ Proces zakończony, ale sprawdź raport błędów.")
             if st.button("Reset", key="btn_reset_err"):
                 del st.session_state["graph_state"]
                 st.session_state["pipeline_active"] = False
                 st.rerun()
+
+### Dlaczego to działa?
+# Dodałem kluczowe sprawdzenie:
+if next_node == "end":
+    should_run_graph = False
