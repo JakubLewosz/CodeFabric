@@ -8,102 +8,76 @@ def parse_and_save_files(ai_response: str):
     if not ai_response: return []
     pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
     matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
-    created_files = []
-    
+    created = []
     if not matches and len(ai_response.strip()) > 10:
         write_file("raw_code.txt", ai_response)
         return ["raw_code.txt"]
-
-    for filename, content in matches:
-        filename = filename.strip()
-        content = content.strip()
-        content = re.sub(r"^```[a-zA-Z]*\n", "", content)
+    for fname, content in matches:
+        fname = fname.strip()
+        content = re.sub(r"^```[a-zA-Z]*\n", "", content.strip())
         content = re.sub(r"\n```$", "", content)
-        write_file(filename, content)
-        print(f"-> Zapisano: {filename}")
-        created_files.append(filename)
-    return created_files
+        write_file(fname, content)
+        print(f"-> Zapisano: {fname}")
+        created.append(fname)
+    return created
 
 def coder_node(state: AgentState):
-    plan = state.get("plan", "Brak planu.")
+    plan = state.get("plan", "")
     feedback = state.get("feedback", "")
-    current_revisions = state.get("revision_count", 0)
+    revs = state.get("revision_count", 0)
     
     model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
-    # Zwiększamy num_predict, żeby nie ucinało kodu w połowie
-    llm = get_llm(model_name, temperature=0.1, num_ctx=16384) 
+    # Używamy Qwen, bo on najlepiej rozumie logikę
+    llm = get_llm(model_name, temperature=0.1, num_ctx=16384)
 
-    # Kontekst plików
     existing_files = get_all_file_paths()
     code_context = ""
     if existing_files:
-        print(f"--- PROGRAMISTA: ANALIZA {len(existing_files)} PLIKÓW ---")
         for f in existing_files:
             content = read_file(f)
             code_context += f"\n--- PLIK: {f} ---\n{content[:6000]}\n"
 
-    # Logika promptu
+    instruction = "Napisz ROBUSTNY (odporny na błędy) i KOMPLETNY kod."
     if feedback and "REJECT" in str(feedback).upper():
-        print(f"--- PROGRAMISTA ({model_name}): NAPRAWA BŁĘDÓW (v{current_revisions + 1}) ---")
-        new_revision_count = current_revisions + 1
-        instruction = f"""
-        TO JEST TRYB NAPRAWY (DEBUGGING).
-        Twój poprzedni kod nie działał lub został odrzucony.
-        
-        LISTA BŁĘDÓW:
-        {feedback}
-        
-        ZADANIE: Przepisz kod plików, naprawiając błędy.
-        Upewnij się, że kod jest KOMPLETNY i DZIAŁAJĄCY.
-        """
-    else:
-        print(f"--- PROGRAMISTA ({model_name}): IMPLEMENTACJA ---")
-        new_revision_count = current_revisions
-        instruction = "Napisz profesjonalny, działający kod na podstawie planu."
+        instruction = f"POPRAW BŁĘDY LOGICZNE:\n{feedback}\nUpewnij się, że program się uruchomi."
+        revs += 1
 
+    # NOWY PROMPT Z NACISKIEM NA DZIAŁANIE
     msg = HumanMessage(content=f"""
     {instruction}
     
-    PLAN PROJEKTU:
-    {plan}
+    PLAN: {plan}
+    KONTEKST: {code_context}
     
-    ISTNIEJĄCY KOD (KONTEKST):
-    {code_context}
-    
-    --- ZASADY GENEROWANIA ---
-    1. Nie używaj skrótów typu `// ... reszta kodu`. PISZ CAŁY KOD.
-    2. Pamiętaj o importach i strukturze (np. namespace w C#).
-    3. Użyj pełnych ścieżek w nagłówkach (z folderem głównym).
+    --- STANDARDY JAKOŚCI (MUST HAVE) ---
+    1. KOMPLETNOŚĆ: Nie zostawiaj "TODO" ani pustych funkcji. Kod ma działać od razu.
+    2. IMPORTY: Upewnij się, że wszystkie biblioteki są zaimportowane.
+    3. PUNKT STARTOWY: Python musi mieć `if __name__ == "__main__":`. C# musi mieć `Main`.
+    4. GUI (jeśli dotyczy): Pamiętaj o pętli `mainloop()` (Tkinter) lub `while True` (Pygame) i obsłudze `QUIT`.
     
     FORMAT:
     ### FILE: folder/plik.ext
-    PEŁNY_KOD_ŹRÓDŁOWY
+    KOD
     ### ENDFILE
     """)
     
-    print(f"--- WYSYŁANIE DO AI... ---")
+    print(f"--- PROGRAMISTA ({model_name}): PISZE KOD ---")
     
-    full_response = ""
+    full_res = ""
     try:
-        response_obj = llm.invoke([msg])
-        full_response = response_obj.content
+        res = llm.invoke([msg])
+        full_res = res.content
     except Exception as e:
-        err = f"BŁĄD LLM: {e}"
-        print(err)
-        write_file("error_log.txt", err)
+        print(e)
+        write_file("error_log.txt", str(e))
 
-    saved_files = parse_and_save_files(full_response)
-    
-    if not saved_files:
-        write_file("error_report.txt", f"Brak plików. Odpowiedź:\n{full_response[:500]}")
-        saved_files.append("error_report.txt")
-    
-    if not saved_files and existing_files:
-        saved_files = existing_files
+    saved = parse_and_save_files(full_res)
+    if not saved: saved.append("error_report.txt")
+    if not saved and existing_files: saved = existing_files
 
     return {
-        "current_files": saved_files,
-        "messages": [AIMessage(content=f"Pliki: {saved_files}")],
-        "revision_count": new_revision_count,
+        "current_files": saved,
+        "messages": [AIMessage(content=f"Gotowe: {saved}")],
+        "revision_count": revs,
         "feedback": None
     }
