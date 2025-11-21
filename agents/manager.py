@@ -6,38 +6,49 @@ from state import AgentState
 load_dotenv()
 
 def manager_node(state: AgentState):
+    """
+    Agent Zarządzający.
+    POPRAWKA: Priorytet ma sukces (APPROVE) nad limitem prób.
+    """
     plan = state.get("plan")
     files = state.get("current_files")
     feedback = state.get("feedback")
     revision_count = state.get("revision_count", 0)
     plan_approved = state.get("plan_approved", False)
 
-    # 1. Bezpiecznik
-    if revision_count > 3:
-        print("🛑 MANAGER: Limit poprawek.")
+    # --- 1. NAJWAŻNIEJSZE: CZY MAMY SUKCES? ---
+    # Sprawdzamy to JAKO PIERWSZE. Jeśli Recenzent dał APPROVE,
+    # to nie obchodzi nas, że to była 10. próba. Ważne, że się udało.
+    if files and feedback and "APPROVE" in str(feedback).upper():
+        print("✅ MANAGER: Projekt zatwierdzony (Mimo licznika).")
         return {"next_node": "end"}
 
-    # 2. Brak planu -> Planner
+    # --- 2. BEZPIECZNIK (LIMIT POPRAWEK) ---
+    # Dopiero jeśli NIE MA sukcesu, sprawdzamy czy nie kręcimy się w kółko.
+    if revision_count >= 3:
+        print(f"🛑 MANAGER: Limit poprawek ({revision_count}). Kończę, oddaję co mam.")
+        # Tutaj kończymy, nawet jeśli kod jest błędny, żeby nie zawiesić komputera.
+        return {"next_node": "end"}
+
+    # --- 3. STANDARDOWY PRZEPŁYW ---
+    
+    # Brak planu -> Planner
     if not plan:
         return {"next_node": "planner"}
 
-    # 3. Czekanie na zatwierdzenie (UI)
+    # Czekanie na zatwierdzenie planu (UI)
     if plan and not plan_approved:
-        if feedback: return {"next_node": "planner"}
-        return {"next_node": "end"} 
+        if feedback: return {"next_node": "planner"} # Poprawki planu od człowieka
+        return {"next_node": "end"} # Pauza dla UI
 
-    # 4. START KODOWANIA (POPRAWIONA LOGIKA)
-    # Jeśli plan jest zatwierdzony, a nie ma jeszcze recenzji (feedback jest pusty),
-    # to znaczy, że musimy uruchomić Programistę.
-    # Ignorujemy fakt istnienia plików (mogą być stare).
-    if plan and plan_approved and not feedback:
+    # Plan zatwierdzony, brak plików -> Coder
+    if plan and plan_approved and not files:
         return {"next_node": "coder"}
 
-    # 5. Pętla Jakości
-    if files and feedback:
-        if "APPROVE" in str(feedback).upper():
-            return {"next_node": "end"}
-        elif "REJECT" in str(feedback).upper():
-            return {"next_node": "coder"}
+    # Pętla Jakości (Jeśli feedback to REJECT)
+    if files and feedback and "REJECT" in str(feedback).upper():
+        print(f"⚠️ MANAGER: Błędy wykryte. Zarządzam poprawkę (Próba {revision_count + 1}).")
+        return {"next_node": "coder"}
 
+    # Fallback
     return {"next_node": "end"}
