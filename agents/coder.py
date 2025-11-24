@@ -92,7 +92,7 @@ def coder_node(state: AgentState):
     feedback = state.get("feedback", "")
     current_revisions = state.get("revision_count", 0)
     
-    model_name = state.get("model_names", {}).get("coder", "qwen2.5-coder:32b")
+    model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
     llm = get_llm(model_name, temperature=0.0, num_ctx=32768) 
 
     # === 1. WCZYTANIE KONTEKSTU (PAMIĘĆ) ===

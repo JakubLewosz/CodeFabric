@@ -47,7 +47,7 @@ def reviewer_node(state: AgentState):
         }
 
     # === 3. POBIERANIE MODELU ===
-    model_name = state.get("model_names", {}).get("chat", "mistral:7b")
+    model_name = state.get("model_names", {}).get("chat", "bielik2.6:11b")
     llm = get_llm(model_name, temperature=0.1, num_ctx=16384)
 
     # === 4. PRZYGOTOWANIE KONTEKSTU ===

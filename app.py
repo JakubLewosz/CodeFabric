@@ -16,8 +16,8 @@ st.set_page_config(
 
 # --- DOSTĘPNE MODELE ---
 AVAILABLE_MODELS = [
-    "qwen2.5-coder:32b", "qwen2.5-coder:14b", "mistral-small:24b", "gemma2:27b", 
-    "qwq:32b", "llama3.3:70b", "mistral:7b", "codellama:13b"
+    "qwen3-coder:30b", "bielik2.6:11b", "mistral-small3.2:24b", "gemma3:27b", 
+    "qwq:32b", "llama3.3:70b", "mistral:7b", "llama4:16x17b", "gpt-oss-safeguard:20b"
 ]
 
 # --- CSS ---
@@ -63,8 +63,8 @@ with st.sidebar:
     st.divider()
     
     st.markdown("#### 🧠 Wybór Mózgów")
-    chat_model = st.selectbox("🗣️ Architekt/Manager", AVAILABLE_MODELS, index=6)
-    coder_model = st.selectbox("👨‍💻 Programista", AVAILABLE_MODELS, index=0)
+    chat_model = st.selectbox("🗣️ Architekt/Manager", AVAILABLE_MODELS, index=1)  # bielik2.6:11b
+    coder_model = st.selectbox("👨‍💻 Programista", AVAILABLE_MODELS, index=0)  # qwen3-coder:30b
     st.divider()
 
     st.markdown("#### 📂 Pliki")

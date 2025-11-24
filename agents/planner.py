@@ -6,7 +6,7 @@ from state import AgentState
 from tools.llm_factory import get_llm
 
 def planner_node(state: AgentState):
-    model_name = state.get("model_names", {}).get("chat", "mistral:7b")
+    model_name = state.get("model_names", {}).get("chat", "bielik2.6:11b")
     llm = get_llm(model_name, temperature=0, num_ctx=16384) 
     
     messages = state["messages"]
