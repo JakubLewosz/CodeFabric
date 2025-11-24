@@ -7,7 +7,7 @@ from tools.llm_factory import get_llm
 
 def planner_node(state: AgentState):
     model_name = state.get("model_names", {}).get("chat", "mistral:7b")
-    llm = get_llm(model_name, temperature=0) 
+    llm = get_llm(model_name, temperature=0, num_ctx=16384) 
     
     messages = state["messages"]
     feedback = state.get("feedback", "")
@@ -15,44 +15,110 @@ def planner_node(state: AgentState):
     
     files_list_str = "\n".join([f"- {f}" for f in current_files]) if current_files else "BRAK (Pusty folder)"
     
-    # --- TRYB ROZWOJU (GDY SĄ PLIKI) ---
+    # === ANALIZA KONTEKSTU ===
+    is_new_project = not current_files
+    has_user_feedback = bool(feedback)
+    
+    # === TRYB ROZWOJU (GDY SĄ PLIKI) ===
     if current_files:
         print(f"--- ARCHITEKT ({model_name}): TRYB CHIRURGICZNY (ROZWÓJ) ---")
+        
+        if has_user_feedback:
+            context_info = f"\n🔄 UWAGI UŻYTKOWNIKA:\n{feedback}\n"
+        else:
+            context_info = ""
+        
         system_instruction = f"""
-        Jesteś Głównym Architektem. Projekt już istnieje.
-        
-        OBECNE PLIKI:
-        {files_list_str}
-        
-        ZADANIE:
-        Zaplanuj PRECYZYJNE zmiany w kodzie, aby spełnić prośbę użytkownika.
-        
-        ZASADY KRYTYCZNE DLA EDYCJI:
-        1. Nie każ pisać plików od nowa, jeśli to niekonieczne.
-        2. Jeśli zmieniamy logikę, wskaż KONKRETNY PLIK i co w nim dodać/zmienić.
-        3. Przykład planu edycji: 
-           "- main.py: Dodaj zmienną 'score' w klasie Game. Zaktualizuj pętlę draw()."
-        
-        Nie pisz ogólników typu "Zaktualizuj grę". Pisz technicznie: "W pliku X dodaj Y".
-        """
+Jesteś Głównym Architektem. Projekt już istnieje.
+
+OBECNE PLIKI:
+{files_list_str}
+{context_info}
+
+=== ZADANIE ===
+Zaplanuj PRECYZYJNE zmiany w kodzie, aby spełnić prośbę użytkownika.
+
+=== ZASADY KRYTYCZNE DLA EDYCJI ===
+1. **NIE każ pisać plików od nowa**, jeśli wystarczą drobne zmiany.
+2. Używaj formatu: "W pliku X: [konkretna zmiana]"
+3. Jeśli zmieniasz logikę, wskaż:
+   - Który plik
+   - Którą funkcję/klasę
+   - Co dokładnie dodać/zmienić/usunąć
+
+=== PRZYKŁAD DOBREGO PLANU (EDYCJA) ===
+```
+- main.py: 
+  * Dodaj zmienną 'score = 0' na początku klasy Game
+  * W metodzie update(): Dodaj 'self.score += 10' po kolizji
+  
+- ui.py:
+  * W funkcji draw_hud(): Dodaj wyświetlanie score
+  * Użyj: font.render(f"Score: {{game.score}}", ...)
+```
+
+=== PRZYKŁAD ZŁEGO PLANU ===
+❌ "Zaktualizuj grę o system punktacji" (za ogólne)
+❌ "Dodaj kilka nowych funkcji" (nie wiadomo jakich)
+
+=== FORMAT ODPOWIEDZI ===
+Odpowiedz TYLKO w formacie listy z konkretnymi instrukcjami.
+Nie pisz wstępów typu "Oto plan:", tylko bezpośrednio:
+
+- plik.py: [konkretna akcja]
+- inny_plik.js: [konkretna akcja]
+"""
     
-    # --- TRYB NOWY PROJEKT ---
+    # === TRYB NOWY PROJEKT ===
     else:
         print(f"--- ARCHITEKT ({model_name}): NOWY PROJEKT ---")
-        system_instruction = """
-        Jesteś Głównym Architektem.
-        Stwórz strukturę plików dla NOWEGO projektu od zera.
-        Wymyśl nazwę folderu głównego (np. 'snake_game/').
-        """
+        system_instruction = f"""
+Jesteś Głównym Architektem. Tworzysz strukturę NOWEGO projektu od zera.
+
+=== ZADANIE ===
+Stwórz pełną strukturę plików dla projektu opisanego przez użytkownika.
+
+=== ZASADY ===
+1. Wymyśl nazwę folderu głównego (np. 'snake_game/', 'todo_app/')
+2. Zaplanuj wszystkie potrzebne pliki z pełnymi ścieżkami
+3. Uwzględnij:
+   - Plik główny (main.py, app.js, index.html)
+   - Moduły/komponenty
+   - Konfigurację (jeśli potrzebna)
+   - README.md (OBOWIĄZKOWY)
+
+=== PRZYKŁAD DOBREGO PLANU (NOWY PROJEKT) ===
+```
+- snake_game/main.py: Główna pętla gry, inicjalizacja Pygame
+- snake_game/snake.py: Klasa Snake z logiką ruchu
+- snake_game/food.py: Klasa Food do zarządzania jedzeniem
+- snake_game/config.py: Stałe (SCREEN_WIDTH, COLORS)
+- snake_game/README.md: Instrukcja uruchomienia, wymagania
+```
+
+=== FORMAT ODPOWIEDZI ===
+Lista plików z krótkim opisem ich zadania:
+- folder/plik.ext: [co robi ten plik]
+"""
 
     tech_requirements = """
-    --- WYMAGANIA ODNOŚNIE ODPOWIEDZI ---
-    Twoja odpowiedź musi zawierać TYLKO PLAN w formacie listy.
-    Używaj pełnych ścieżek (folder/plik).
-    """
 
-    final_prompt = SystemMessage(content=system_instruction + "\n" + tech_requirements)
-    response = llm.invoke([final_prompt] + messages)
+=== WYMAGANIA TECHNICZNE ===
+- Używaj pełnych ścieżek (folder/plik.ext)
+- Każdy plik musi mieć krótki opis co robi
+- NIE używaj zagnieżdżeń głębszych niż 2 poziomy (folder/subfolder/file max)
+- README.md jest OBOWIĄZKOWY
+"""
+
+    final_prompt = SystemMessage(content=system_instruction + tech_requirements)
+    
+    # === WYWOŁANIE LLM ===
+    try:
+        response = llm.invoke([final_prompt] + messages)
+        print(f"→ Plan wygenerowany ({len(response.content)} znaków)")
+    except Exception as e:
+        print(f"⚠️ Błąd podczas planowania: {e}")
+        response = type('obj', (object,), {'content': f"BŁĄD: {e}"})()
     
     return {
         "plan": response.content,

@@ -6,13 +6,39 @@ from state import AgentState
 from tools.file_ops import read_file
 from tools.llm_factory import get_llm
 
+def smart_truncate(content: str, max_length: int = 8000) -> str:
+    """
+    Inteligentne obcinanie - zachowuje początek i koniec.
+    """
+    if len(content) <= max_length:
+        return content
+    
+    head_size = max_length // 2
+    tail_size = max_length // 2
+    omitted = len(content) - max_length
+    
+    return (
+        content[:head_size] + 
+        f"\n\n# ... [POMINIĘTO {omitted} ZNAKÓW] ...\n\n" + 
+        content[-tail_size:]
+    )
+
 def reviewer_node(state: AgentState):
     current_files = state.get("current_files", [])
     
     if not current_files:
         return {"feedback": "Brak plików.", "messages": []}
 
-    # 1. Weryfikacja README
+    # === 1. WALIDACJA PODSTAWOWA ===
+    code_files = [f for f in current_files if f.endswith(('.py', '.js', '.html', '.css', '.cs', '.jsx', '.tsx'))]
+    
+    if not code_files:
+        return {
+            "feedback": "REJECT. Brak plików z kodem źródłowym.",
+            "messages": [AIMessage(content="Tylko pliki nie-kodowe.")]
+        }
+
+    # 2. Weryfikacja README
     has_readme = any("readme.md" in f.lower() for f in current_files)
     if not has_readme:
         return {
@@ -20,48 +46,108 @@ def reviewer_node(state: AgentState):
             "messages": [AIMessage(content="Brak README.")]
         }
 
-    # 2. Pobieramy model (Najlepiej Qwen lub Llama 3, bo muszą rozumieć logikę)
+    # === 3. POBIERANIE MODELU ===
     model_name = state.get("model_names", {}).get("chat", "mistral:7b")
-    llm = get_llm(model_name, temperature=0.1)
+    llm = get_llm(model_name, temperature=0.1, num_ctx=16384)
 
-    # 3. Przygotowanie kodu
+    # === 4. PRZYGOTOWANIE KONTEKSTU ===
     files_content = ""
-    for file in current_files:
+    total_lines = 0
+    
+    for file in code_files:
         content = read_file(file)
-        # Dla Reviewera kod jest ważniejszy niż dla Codera, więc dajemy mu więcej kontekstu
-        files_content += f"\n--- PLIK: {file} ---\n{content[:6000]}\n"
+        line_count = content.count('\n')
+        total_lines += line_count
+        
+        truncated = smart_truncate(content, max_length=10000)
+        files_content += f"\n--- PLIK: {file} ({line_count} linii) ---\n{truncated}\n"
 
-    print(f"\n--- RECENZENT ({model_name}): SYMULACJA LOGICZNA ---")
+    print(f"\n--- RECENZENT ({model_name}): SYMULACJA LOGICZNA ({len(code_files)} plików, {total_lines} linii) ---")
 
-    # 4. PANCERNY PROMPT WERYFIKACYJNY
+    # === 5. PANCERNY PROMPT WERYFIKACYJNY ===
     msg = HumanMessage(content=f"""
-    Jesteś Senior QA Engineerem. Twoim zadaniem jest nie tylko sprawdzić składnię, ale przeprowadzić MENTALNĄ SYMULACJĘ działania kodu.
-    
-    KOD DO SPRAWDZENIA:
-    {files_content}
-    
-    SPRAWDŹ KRYTYCZNE PUNKTY (Checklista):
-    1. PUNKT WEJŚCIA: Czy jest jasno zdefiniowany (np. `if __name__ == "__main__":`)? Czy wiadomo, co uruchomić?
-    2. PĘTLE NIESKOŃCZONE: Czy `while True` ma mechanizm wyjścia lub `sleep`?
-    3. IMPORTY: Czy używane biblioteki są zaimportowane?
-    4. GUI/GRY: Jeśli to gra (Pygame/Tkinter), czy jest pętla zdarzeń (event loop) i aktualizacja ekranu?
-    5. ŚCIEŻKI: Czy kod odwołuje się do plików, które istnieją w projekcie?
-    
-    DECYZJA:
-    - Jeśli kod wygląda na działający -> napisz tylko: APPROVE
-    - Jeśli znajdziesz błąd logiczny -> napisz: REJECT i opisz błąd. Bądź surowy.
-    
-    Jeśli brakuje logiki (np. pusta funkcja), też daj REJECT.
-    """)
+Jesteś Senior QA Engineerem. Przeprowadź MENTALNĄ SYMULACJĘ działania kodu.
 
+KOD DO SPRAWDZENIA:
+{files_content}
+
+=== CHECKLIST KRYTYCZNY ===
+
+[ ] 1. PUNKT WEJŚCIA
+    - Czy jest `if __name__ == "__main__":` lub podobny mechanizm startu?
+    - Czy wiadomo, co uruchomić?
+
+[ ] 2. PĘTLE NIESKOŃCZONE
+    - Czy `while True` ma mechanizm wyjścia?
+    - Czy jest `sleep()` lub event handling?
+
+[ ] 3. IMPORTY
+    - Czy wszystkie używane biblioteki są zaimportowane?
+    - Czy brak literówek w nazwach modułów?
+
+[ ] 4. GUI/GRY (jeśli dotyczy)
+    - Czy jest pętla zdarzeń (event loop)?
+    - Czy ekran jest aktualizowany (`.flip()`, `.update()`, render)?
+
+[ ] 5. ŚCIEŻKI DO PLIKÓW
+    - Czy kod odwołuje się do plików, które istnieją w projekcie?
+    - Czy nie ma hardcoded ścieżek systemowych?
+
+[ ] 6. LOGIKA
+    - Czy funkcje zwracają wartości, gdy powinny?
+    - Czy puste funkcje/klasy są placeholderami, czy błędem?
+
+[ ] 7. OBSŁUGA BŁĘDÓW
+    - Czy operacje I/O są w try-except?
+    - Czy są warunki obronne przed None/pustymi wartościami?
+
+=== DECYZJA ===
+Odpowiedz TYLKO jednym z formatów:
+
+**APPROVE**
+Kod wygląda na działający. [Opcjonalnie: krótki komentarz]
+
+LUB
+
+**REJECT**
+Błąd: [KONKRETNY opis problemu]
+Lokalizacja: [plik.py, linia X lub nazwa funkcji]
+Rozwiązanie: [co trzeba zmienić]
+
+BĄDŹ SUROWY. Jeśli coś jest podejrzane, daj REJECT.
+Jeśli brakuje kluczowej logiki (pusta funkcja `pass`), to też REJECT.
+""")
+
+    # === 6. WYWOŁANIE I DIAGNOSTYKA ===
     try:
         res = llm.invoke([msg])
-        feedback = res.content
-        print(f"-> Werdykt: {feedback[:100]}...")
-    except Exception:
+        feedback = res.content.strip()
+        print(f"→ Werdykt: {feedback[:150]}...")
+        
+        # Diagnostyka - zapisz raport jeśli REJECT
+        if "REJECT" in feedback.upper():
+            report = f"""# RAPORT RECENZENTA
+            
+## Werdykt
+{feedback}
+
+## Sprawdzone pliki
+{', '.join(code_files)}
+
+## Statystyki
+- Plików kodu: {len(code_files)}
+- Łącznie linii: {total_lines}
+- Model: {model_name}
+"""
+            from tools.file_ops import write_file
+            write_file("review_report.md", report)
+            print("→ Zapisano review_report.md")
+            
+    except Exception as e:
+        print(f"⚠️ Błąd podczas recenzji: {e}")
         feedback = "APPROVE"
 
     return {
         "feedback": feedback,
-        "messages": [res]
+        "messages": [res] if 'res' in locals() else [AIMessage(content=feedback)]
     }
