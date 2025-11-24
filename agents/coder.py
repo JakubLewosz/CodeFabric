@@ -41,16 +41,62 @@ def apply_diff_edits(edits: list) -> list:
         if not current_content:
             print(f"⚠️ Plik {filepath} nie istnieje, pomijam EDIT.")
             continue
-            
+        
+        # Normalizacja whitespace (usuń różnice w spacjach/tabulatorach)
+        search_normalized = " ".join(search_block.split())
+        content_normalized = " ".join(current_content.split())
+        
+        # Dokładne dopasowanie
         if search_block in current_content:
             new_content = current_content.replace(search_block, replace_block, 1)
             write_file(filepath, new_content)
             print(f"✏️ Zaktualizowano (DIFF): {filepath}")
             modified_files.append(filepath)
+        
+        # Fuzzy matching (jeśli różnice w whitespace)
+        elif search_normalized in content_normalized:
+            print(f"⚠️ Znaleziono podobny blok w {filepath} (różnice w spacjach)")
+            # Znajdź oryginalny fragment
+            lines = current_content.split('\n')
+            search_lines = search_block.split('\n')
+            
+            # Prosta heurystyka - znajdź pierwszą linię
+            first_line = search_lines[0].strip()
+            for i, line in enumerate(lines):
+                if first_line in line:
+                    # Zastąp od tej linii
+                    lines_count = len(search_lines)
+                    new_lines = lines[:i] + replace_block.split('\n') + lines[i+lines_count:]
+                    new_content = '\n'.join(new_lines)
+                    write_file(filepath, new_content)
+                    print(f"✏️ Zaktualizowano (FUZZY): {filepath}")
+                    modified_files.append(filepath)
+                    break
+        
+        # Nie znaleziono
         else:
-            print(f"⚠️ Nie znaleziono bloku SEARCH w {filepath}")
-            write_file(f"debug_search_fail_{filepath.replace('/', '_')}.txt", 
-                      f"SZUKANO:\n{search_block}\n\nW PLIKU:\n{current_content[:1000]}")
+            print(f"❌ NIE ZNALEZIONO bloku SEARCH w {filepath}")
+            print(f"   Szukano: {search_block[:100]}...")
+            
+            # Diagnostyka
+            debug_content = f"""
+BŁĄD DIFF-EDITING
+=================
+
+PLIK: {filepath}
+
+SZUKANO (pierwsze 500 znaków):
+{search_block[:500]}
+
+ZAWARTOŚĆ PLIKU (pierwsze 1000 znaków):
+{current_content[:1000]}
+
+SUGESTIA:
+LLM prawdopodobnie nie skopiował DOKŁADNIE kodu z pliku.
+Coder powinien użyć trybu FULL REWRITE dla tego pliku.
+"""
+            write_file(f"debug_diff_fail_{filepath.replace('/', '_')}.txt", debug_content)
+            print(f"   Zapisano diagnostykę: debug_diff_fail_{filepath.replace('/', '_')}.txt")
     
     return modified_files
 
@@ -121,18 +167,25 @@ def coder_node(state: AgentState):
         mode = "TRYB NAPRAWY (DEBUGGING)"
         task_desc = f"Tester zgłosił błędy:\n{feedback}\n\nTwoim zadaniem jest je naprawić."
         current_revisions += 1
-        use_diff_mode = True
+        # Przy naprawach - DIFF tylko jeśli projekt jest duży
+        use_diff_mode = len(existing_files) > 5
         
     elif existing_files:
         mode = "TRYB ROZWOJU (REFACTORING)"
         task_desc = "Zaimplementuj zmiany opisane w planie, modyfikując istniejący kod."
-        use_diff_mode = len(existing_files) > 3
+        # DIFF tylko dla dużych projektów (>5 plików) lub gdy pliki są długie
+        total_lines = sum(read_file(f).count('\n') for f in existing_files if f.endswith(('.py', '.js', '.html')))
+        use_diff_mode = len(existing_files) > 5 or total_lines > 200
         
     else:
         mode = "TRYB TWORZENIA (GREENFIELD)"
         task_desc = "Napisz kod od zera na podstawie planu."
 
     print(f"--- PROGRAMISTA ({model_name}): {mode} ---")
+    if use_diff_mode:
+        print(f"→ Używam DIFF editing ({len(existing_files)} plików, ~{total_lines if 'total_lines' in locals() else '?'} linii)")
+    else:
+        print(f"→ Używam FULL REWRITE (mały projekt)")
 
     # === 3. PRZYGOTOWANIE PROMPTU ===
     
@@ -145,27 +198,42 @@ Zamiast przepisywać całe pliki, użyj formatu SEARCH/REPLACE:
 
 ### EDIT: ścieżka/plik.ext
 SEARCH:
-[DOKŁADNY fragment kodu do znalezienia - może być kilka linii]
+[DOKŁADNY fragment kodu do znalezienia - MUSISZ SKOPIOWAĆ GO 1:1 Z ISTNIEJĄCEGO PLIKU]
 REPLACE:
 [Nowa wersja tego fragmentu]
 ### END_EDIT
 
-ZASADY KRYTYCZNE:
-1. Blok SEARCH musi zawierać DOKŁADNY fragment z istniejącego pliku (skopiuj go 1:1).
-2. Jeśli edytujesz funkcję, skopiuj jej całą sygnaturę w SEARCH.
-3. Możesz użyć wielu bloków EDIT dla różnych plików.
-4. NIE UŻYWAJ skrótów typu "... reszta kodu" - tylko konkretne fragmenty.
+ZASADY KRYTYCZNE (PRZECZYTAJ 3 RAZY):
+1. Blok SEARCH musi być IDENTYCZNY z fragmentem w pliku (co do znaku).
+2. Otwórz plik mentalnie, SKOPIUJ dokładny fragment (ze spacjami, wcięciami).
+3. Jeśli edytujesz funkcję - SKOPIUJ JĄ CAŁĄ w SEARCH (od "def" do końca).
+4. NIE WYMYŚLAJ kodu w SEARCH - KOPIUJ CO WIDZISZ.
+5. NIE SKRACAJ - jeśli funkcja ma 10 linii, SEARCH musi mieć 10 linii.
 
-PRZYKŁAD:
+PRZYKŁAD DOBRY:
 ### EDIT: game.py
 SEARCH:
-def update(self):
-    self.x += 1
+def spawn_food(self):
+    self.food_pos = [random.randint(0, 19), random.randint(0, 19)]
 REPLACE:
-def update(self):
-    self.x += self.velocity
-    self.check_collision()
+def spawn_food(self):
+    self.food_pos = [random.randint(0, 19), random.randint(0, 19)]
+    self.food2_pos = [random.randint(0, 19), random.randint(0, 19)]
 ### END_EDIT
+
+PRZYKŁAD ZŁY (❌ NIE RÓB TEGO):
+### EDIT: game.py
+SEARCH:
+def spawn_food(self):
+    # spawn food
+REPLACE:
+def spawn_food(self):
+    # spawn two foods
+### END_EDIT
+☝️ To jest ZŁE bo SEARCH nie jest dokładnym kodem z pliku!
+
+JEŚLI NIE JESTEŚ PEWIEN DOKŁADNEGO KODU:
+Użyj trybu FULL REWRITE (### FILE: ... ### ENDFILE) zamiast EDIT.
 
 Teraz przeanalizuj kod i zaplanuj edycje.
 """)
@@ -232,6 +300,11 @@ AKTUALNY KOD PROJEKTU (KONTEKST):
         if edits:
             print(f"→ Znaleziono {len(edits)} edycji DIFF.")
             saved_files = apply_diff_edits(edits)
+            
+            # NOWOŚĆ: Jeśli diff nie zadziałał dla żadnego pliku -> fallback na FILE
+            if not saved_files:
+                print("⚠️ Wszystkie edycje DIFF FAILED. Próbuję FULL REWRITE...")
+                saved_files = parse_and_save_files(full_response)
         else:
             print("⚠️ Brak edycji DIFF, próbuję trybu FILE...")
             saved_files = parse_and_save_files(full_response)
