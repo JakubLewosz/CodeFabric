@@ -1,76 +1,85 @@
 import os
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from state import AgentState
 from tools.llm_factory import get_llm
 
 def planner_node(state: AgentState):
+    # 1. Konfiguracja modelu
     model_name = state.get("model_names", {}).get("chat", "mistral:7b")
     llm = get_llm(model_name, temperature=0) 
     
     messages = state["messages"]
     feedback = state.get("feedback", "")
     current_files = state.get("current_files", [])
-    files_context = ", ".join(current_files) if current_files else "BRAK (Pusty folder)"
     
-    # Pobieramy STARY PLAN (żeby go nie zapomnieć)
-    existing_plan = state.get("plan", "")
-
-    # --- CZĘŚĆ WSPÓLNA PROMPTU (ZASADY) ---
-    tech_requirements = """
-    --- WYMAGANIA TECHNOLOGICZNE (KRYTYCZNE) ---
-    1. C# / .NET:
-       - OBOWIĄZKOWO: Plik `.csproj`.
-       - OBOWIĄZKOWO: `Program.cs` z `Main`.
-    2. Python:
-       - `requirements.txt`, `main.py`.
-    3. Web:
-       - `index.html`, `style.css`, `script.js`.
+    # Formatujemy listę istniejących plików do promptu
+    files_list_str = "\n".join([f"- {f}" for f in current_files]) if current_files else "BRAK (Pusty folder)"
     
-    --- ZASADY OGÓLNE ---
-    1. ZAWSZE używaj folderu głównego (np. 'MyApp/').
-    2. ZAWSZE dodaj 'README.md'.
-    """
-
     # --- LOGIKA WYBORU TRYBU ---
-    if feedback and existing_plan:
-        # TRYB POPRAWKI (Maintenance Mode)
-        print(f"--- ARCHITEKT ({model_name}): AKTUALIZACJA ISTNIEJĄCEGO PLANU ---")
-        sys_msg = SystemMessage(content=f"""
-        Jesteś Tech Leadem. Jesteśmy w trakcie projektu.
-        Użytkownik lub Tester zgłosił problemy.
+    
+    # SCENARIUSZ 1: POPRAWKI TESTERA (Feedback Loop)
+    if feedback and not state.get("plan_approved"):
+        print(f"--- ARCHITEKT ({model_name}): TRYB NAPRAWY PLANU ---")
+        system_instruction = f"""
+        Jesteś Tech Leadem. Poprawiasz plan na podstawie uwag użytkownika.
         
-        POPRZEDNI PLAN PROJEKTU:
-        {existing_plan}
+        UWAGI: {feedback}
+        POPRZEDNI PLAN: {state.get("plan", "")}
         
-        UWAGI/BŁĘDY DO NAPRAWIENIA:
-        {feedback}
+        Zaktualizuj plan. Nie zmieniaj tego, co było dobre.
+        """
+
+    # SCENARIUSZ 2: ROZWÓJ ISTNIEJĄCEGO PROJEKTU (To naprawia Twój problem!)
+    elif current_files:
+        print(f"--- ARCHITEKT ({model_name}): TRYB ROZWOJU (FEATURE REQUEST) ---")
+        system_instruction = f"""
+        Jesteś Tech Leadem. Projekt już istnieje.
+        Użytkownik prosi o ZMIANY lub NOWE FUNKCJE w istniejącym kodzie.
+        
+        OBECNA STRUKTURA PLIKÓW:
+        {files_list_str}
         
         ZADANIE:
-        Zaktualizuj powyższy plan, aby rozwiązać problemy.
-        NIE ZMIENIAJ całej koncepcji. Nie zmieniaj technologii, jeśli nie zostałeś o to poproszony.
-        Zachowaj istniejące pliki, chyba że trzeba je usunąć/zmienić.
+        Zaplanuj edycję istniejących plików, aby spełnić prośbę użytkownika.
         
-        {tech_requirements}
-        
-        TWOJA ODPOWIEDŹ (TYLKO PLAN):
-        Zwróć poprawioną listę plików i opisów.
-        """)
+        ZASADY KRYTYCZNE DLA ROZWOJU:
+        1. NIE twórz nowej struktury folderów, jeśli obecna jest dobra. Użyj istniejących nazw.
+        2. Jeśli trzeba zmienić kod w `main.py`, napisz w planie: "Zmodyfikuj main.py, aby dodać..."
+        3. NIE usuwaj istniejących plików, chyba że to konieczne.
+        4. Jeśli użytkownik chce nową funkcję (np. "dodaj owoc"), wskaż konkretny plik do edycji.
+        """
+
+    # SCENARIUSZ 3: NOWY PROJEKT (Pusty folder)
     else:
-        # TRYB NOWY PROJEKT
-        print(f"--- ARCHITEKT ({model_name}): TWORZENIE NOWEGO PLANU ---")
-        sys_msg = SystemMessage(content=f"""
-        Jesteś Tech Leadem. Stwórz strukturę nowego projektu.
+        print(f"--- ARCHITEKT ({model_name}): NOWY PROJEKT ---")
+        system_instruction = f"""
+        Jesteś Tech Leadem. Folder roboczy jest pusty.
+        Stwórz strukturę plików dla NOWEGO projektu od zera.
         
-        STAN WORKSPACE: [{files_context}]
-        
-        ZADANIE: Stwórz listę plików i opisów.
-        
-        {tech_requirements}
-        """)
+        ZASADY:
+        1. Wymyśl nazwę folderu głównego (np. 'snake_game/').
+        2. Wszystkie pliki muszą być w tym folderze.
+        3. Uwzględnij 'README.md'.
+        """
+
+    # --- WSPÓLNE WYMAGANIA TECHNICZNE ---
+    tech_requirements = """
+    --- WYMAGANIA ODNOŚNIE ODPOWIEDZI ---
+    Twoja odpowiedź musi zawierać TYLKO PLAN w formacie listy punktowanej.
+    Dla każdego pliku podaj:
+    - Pełną ścieżkę (np. snake/main.py)
+    - Instrukcję co ma się w nim znaleźć (lub co zmienić).
     
-    response = llm.invoke([sys_msg] + messages)
+    Nie pisz kodu.
+    """
+
+    # Sklejenie promptu
+    final_prompt = SystemMessage(content=system_instruction + "\n" + tech_requirements)
+    
+    # Wywołanie
+    response = llm.invoke([final_prompt] + messages)
     
     return {
         "plan": response.content,
