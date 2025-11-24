@@ -1,102 +1,136 @@
 import re
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from state import AgentState
 from tools.file_ops import write_file, read_file, get_all_file_paths
 from tools.llm_factory import get_llm
 
 def parse_and_save_files(ai_response: str):
+    """Parsuje odpowiedź AI i zapisuje pliki."""
     if not ai_response: return []
+
+    # Regex szuka bloków: ### FILE: nazwa ... ### ENDFILE
     pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
     matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
-    created = []
+    created_files = []
     
-    if not matches and len(ai_response.strip()) > 10:
+    # Fallback
+    if not matches and len(ai_response.strip()) > 50:
         write_file("raw_code.txt", ai_response)
         return ["raw_code.txt"]
 
-    for fname, content in matches:
-        fname = fname.strip()
+    for filename, content in matches:
+        filename = filename.strip()
         content = content.strip()
-        # Usuwanie markdowna i komentarzy "myślowych" z początku
+        # Usuwanie śmieci (markdown, komentarze z planem myślowym jeśli wpadły)
         content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
         
-        write_file(fname, content)
-        print(f"-> Zaktualizowano: {fname}")
-        created.append(fname)
-    return created
+        write_file(filename, content)
+        print(f"-> Zaktualizowano plik: {filename}")
+        created_files.append(filename)
+        
+    return created_files
 
 def coder_node(state: AgentState):
-    plan = state.get("plan", "")
+    plan = state.get("plan", "Brak planu.")
     feedback = state.get("feedback", "")
-    revs = state.get("revision_count", 0)
+    current_revisions = state.get("revision_count", 0)
     
+    # Konfiguracja modelu (Qwen jest tu kluczowy!)
     model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
-    # TEMP 0.0 DLA PRECYZJI EDYCJI!
-    llm = get_llm(model_name, temperature=0.0, num_ctx=16384)
+    # Bardzo duży kontekst, żeby zmieścił cały stary kod + nowy kod
+    llm = get_llm(model_name, temperature=0.0, num_ctx=24000) 
 
-    # Wczytujemy kontekst plików
+    # 1. WCZYTANIE KONTEKSTU (PAMIĘĆ)
     existing_files = get_all_file_paths()
     code_context = ""
     if existing_files:
         print(f"--- PROGRAMISTA: ANALIZA {len(existing_files)} PLIKÓW ---")
         for f in existing_files:
-            content = read_file(f)
-            code_context += f"\n=== PLIK: {f} ===\n{content}\n==================\n"
+            # Ignorujemy pliki binarne/systemowe, czytamy tylko kod
+            if f.endswith(('.py', '.js', '.html', '.css', '.cs', '.json', '.md', '.txt')):
+                content = read_file(f)
+                code_context += f"\n=== PLIK ISTNIEJĄCY: {f} ===\n{content}\n============================\n"
+    else:
+        code_context = "BRAK PLIKÓW (Nowy projekt)."
 
-    # Budowanie Promptu
-    instruction = "Wykonaj zmiany w kodzie zgodnie z planem."
+    # 2. PRZYGOTOWANIE INSTRUKCJI (System vs User)
+    
     if feedback and "REJECT" in str(feedback).upper():
-        instruction = f"POPRAW BŁĘDY:\n{feedback}"
-        revs += 1
+        mode = "TRYB NAPRAWY (DEBUGGING)"
+        task_desc = f"Tester zgłosił błędy:\n{feedback}\nTwoim zadaniem jest je naprawić."
+        current_revisions += 1
+    elif existing_files:
+        mode = "TRYB ROZWOJU (REFACTORING)"
+        task_desc = "Zaimplementuj zmiany opisane w planie, modyfikując istniejący kod."
+    else:
+        mode = "TRYB TWORZENIA (GREENFIELD)"
+        task_desc = "Napisz kod od zera na podstawie planu."
 
-    msg = HumanMessage(content=f"""
-    {instruction}
+    print(f"--- PROGRAMISTA ({model_name}): {mode} ---")
+
+    # SYSTEM PROMPT: Definiuje osobowość i zasady techniczne
+    sys_msg = SystemMessage(content=f"""
+    Jesteś Expert Software Engineerem specjalizującym się w refaktoryzacji.
+    Twoim celem jest dostarczenie DZIAŁAJĄCEGO, KOMPLETNEGO kodu.
     
-    PLAN DZIAŁANIA:
-    {plan}
-    
-    --- AKTUALNY KOD PROJEKTU (DO EDYCJI) ---
-    {code_context}
-    
-    --- INSTRUKCJA MASTER ---
-    1. Jesteś "Inteligentnym Edytorem". Twoim celem jest WPROWADZENIE ZMIAN bez psucia reszty.
-    2. Jeśli edytujesz plik, musisz wypisać go W CAŁOŚCI (od pierwszej do ostatniej linijki).
-    3. ZABRONIONE: Używanie skrótów typu `// ... reszta kodu bez zmian`. To zniszczy plik!
-    4. Zachowaj istniejące funkcje, chyba że plan każe je usunąć.
+    --- ZASADY EDYCJI PLIKÓW (KRYTYCZNE) ---
+    1. Jeśli edytujesz plik, musisz zwrócić jego PEŁNĄ, NOWĄ ZAWARTOŚĆ.
+    2. ABSOLUTNY ZAKAZ używania skrótów: `// ... reszta kodu`, `# ... existing code`. TO PSUJE PLIK.
+    3. Musisz zachować istniejące funkcjonalności, chyba że plan każe je usunąć.
+    4. Upewnij się, że nowe funkcje (np. nowa klasa) są faktycznie WYWOŁYWANE w głównym kodzie (np. w game loop).
     
     --- FORMAT ODPOWIEDZI ---
-    Najpierw napisz krótko plan działania (myślenie), a potem kod.
+    Krok 1: ANALIZA (Jako komentarz). Napisz krótko: co zmienisz, w którym miejscu.
+    Krok 2: KOD. Użyj znaczników:
     
-    PRZYKŁAD:
-    ### MYŚLENIE
-    Muszę dodać klasę BlueFruit do main.py i wywołać ją w pętli gry.
-    
-    ### FILE: folder/main.py
-    import pygame
-    ... CAŁY KOD Z NOWYMI ZMIANAMI ...
+    ### FILE: sciezka/plik.ext
+    PEŁNY_KOD_PLIKU
     ### ENDFILE
     """)
-    
-    print(f"--- PROGRAMISTA ({model_name}): EDYCJA KODU ---")
-    
-    full_res = ""
-    try:
-        res = llm.invoke([msg])
-        full_res = res.content
-    except Exception as e:
-        print(f"BŁĄD LLM: {e}")
-        write_file("error_log.txt", str(e))
 
-    saved = parse_and_save_files(full_res)
+    # USER PROMPT: Zawiera konkretne dane
+    user_msg = HumanMessage(content=f"""
+    TRYB PRACY: {mode}
     
-    # Jeśli coder nic nie zmienił, zwracamy stare pliki
-    if not saved and existing_files: saved = existing_files
-    if not saved: saved.append("error_report.txt")
+    PLAN ARCHITEKTA (CO ZROBIĆ):
+    {plan}
+    
+    ZADANIE SZCZEGÓŁOWE:
+    {task_desc}
+    
+    AKTUALNY KOD PROJEKTU (KONTEKST):
+    {code_context}
+    
+    Rozpocznij od analizy zmian, a potem wygeneruj PEŁNE pliki.
+    """)
+    
+    full_response = ""
+    try:
+        # Używamy invoke (bezpieczniej przy dużym kontekście)
+        print("--- WYSYŁANIE DO AI (To może chwilę potrwać)... ---")
+        response_obj = llm.invoke([sys_msg, user_msg])
+        full_response = response_obj.content
+        print(f"-> Otrzymano {len(full_response)} znaków.")
+        
+    except Exception as e:
+        err = f"BŁĄD LLM: {e}"
+        print(err)
+        write_file("error_log.txt", err)
+
+    saved_files = parse_and_save_files(full_response)
+    
+    # Jeśli Coder nic nie zwrócił, a mieliśmy pliki, to znaczy że "nie widział potrzeby zmian"
+    # Ale my chcemy, żeby proces szedł dalej, więc zwracamy stare pliki.
+    if not saved_files and existing_files:
+        saved_files = existing_files
+    elif not saved_files:
+        write_file("error_report.txt", f"Brak kodu. Odpowiedź AI:\n{full_response[:500]}")
+        saved_files.append("error_report.txt")
 
     return {
-        "current_files": saved,
-        "messages": [AIMessage(content=f"Zmiany wprowadzone: {saved}")],
-        "revision_count": revs,
+        "current_files": saved_files,
+        "messages": [AIMessage(content=f"Zaktualizowano pliki: {saved_files}")],
+        "revision_count": current_revisions,
         "feedback": None
     }
