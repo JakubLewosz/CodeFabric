@@ -9,15 +9,20 @@ def parse_and_save_files(ai_response: str):
     pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
     matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
     created = []
+    
     if not matches and len(ai_response.strip()) > 10:
         write_file("raw_code.txt", ai_response)
         return ["raw_code.txt"]
+
     for fname, content in matches:
         fname = fname.strip()
-        content = re.sub(r"^```[a-zA-Z]*\n", "", content.strip())
+        content = content.strip()
+        # Usuwanie markdowna i komentarzy "myślowych" z początku
+        content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
+        
         write_file(fname, content)
-        print(f"-> Zapisano: {fname}")
+        print(f"-> Zaktualizowano: {fname}")
         created.append(fname)
     return created
 
@@ -27,57 +32,71 @@ def coder_node(state: AgentState):
     revs = state.get("revision_count", 0)
     
     model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
-    # Używamy Qwen, bo on najlepiej rozumie logikę
-    llm = get_llm(model_name, temperature=0.1, num_ctx=16384)
+    # TEMP 0.0 DLA PRECYZJI EDYCJI!
+    llm = get_llm(model_name, temperature=0.0, num_ctx=16384)
 
+    # Wczytujemy kontekst plików
     existing_files = get_all_file_paths()
     code_context = ""
     if existing_files:
+        print(f"--- PROGRAMISTA: ANALIZA {len(existing_files)} PLIKÓW ---")
         for f in existing_files:
             content = read_file(f)
-            code_context += f"\n--- PLIK: {f} ---\n{content[:6000]}\n"
+            code_context += f"\n=== PLIK: {f} ===\n{content}\n==================\n"
 
-    instruction = "Napisz ROBUSTNY (odporny na błędy) i KOMPLETNY kod."
+    # Budowanie Promptu
+    instruction = "Wykonaj zmiany w kodzie zgodnie z planem."
     if feedback and "REJECT" in str(feedback).upper():
-        instruction = f"POPRAW BŁĘDY LOGICZNE:\n{feedback}\nUpewnij się, że program się uruchomi."
+        instruction = f"POPRAW BŁĘDY:\n{feedback}"
         revs += 1
 
-    # NOWY PROMPT Z NACISKIEM NA DZIAŁANIE
     msg = HumanMessage(content=f"""
     {instruction}
     
-    PLAN: {plan}
-    KONTEKST: {code_context}
+    PLAN DZIAŁANIA:
+    {plan}
     
-    --- STANDARDY JAKOŚCI (MUST HAVE) ---
-    1. KOMPLETNOŚĆ: Nie zostawiaj "TODO" ani pustych funkcji. Kod ma działać od razu.
-    2. IMPORTY: Upewnij się, że wszystkie biblioteki są zaimportowane.
-    3. PUNKT STARTOWY: Python musi mieć `if __name__ == "__main__":`. C# musi mieć `Main`.
-    4. GUI (jeśli dotyczy): Pamiętaj o pętli `mainloop()` (Tkinter) lub `while True` (Pygame) i obsłudze `QUIT`.
+    --- AKTUALNY KOD PROJEKTU (DO EDYCJI) ---
+    {code_context}
     
-    FORMAT:
-    ### FILE: folder/plik.ext
-    KOD
+    --- INSTRUKCJA MASTER ---
+    1. Jesteś "Inteligentnym Edytorem". Twoim celem jest WPROWADZENIE ZMIAN bez psucia reszty.
+    2. Jeśli edytujesz plik, musisz wypisać go W CAŁOŚCI (od pierwszej do ostatniej linijki).
+    3. ZABRONIONE: Używanie skrótów typu `// ... reszta kodu bez zmian`. To zniszczy plik!
+    4. Zachowaj istniejące funkcje, chyba że plan każe je usunąć.
+    
+    --- FORMAT ODPOWIEDZI ---
+    Najpierw napisz krótko plan działania (myślenie), a potem kod.
+    
+    PRZYKŁAD:
+    ### MYŚLENIE
+    Muszę dodać klasę BlueFruit do main.py i wywołać ją w pętli gry.
+    
+    ### FILE: folder/main.py
+    import pygame
+    ... CAŁY KOD Z NOWYMI ZMIANAMI ...
     ### ENDFILE
     """)
     
-    print(f"--- PROGRAMISTA ({model_name}): PISZE KOD ---")
+    print(f"--- PROGRAMISTA ({model_name}): EDYCJA KODU ---")
     
     full_res = ""
     try:
         res = llm.invoke([msg])
         full_res = res.content
     except Exception as e:
-        print(e)
+        print(f"BŁĄD LLM: {e}")
         write_file("error_log.txt", str(e))
 
     saved = parse_and_save_files(full_res)
-    if not saved: saved.append("error_report.txt")
+    
+    # Jeśli coder nic nie zmienił, zwracamy stare pliki
     if not saved and existing_files: saved = existing_files
+    if not saved: saved.append("error_report.txt")
 
     return {
         "current_files": saved,
-        "messages": [AIMessage(content=f"Gotowe: {saved}")],
+        "messages": [AIMessage(content=f"Zmiany wprowadzone: {saved}")],
         "revision_count": revs,
         "feedback": None
     }
