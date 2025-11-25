@@ -471,6 +471,9 @@ if st.session_state.get("pipeline_active"):
     # Scenariusz B: Sukces
     elif next_node == "end":
         if not last_feedback or "APPROVE" in str(last_feedback).upper():
+            # Sukces - wyłącz pipeline, pozwól pisać dalej
+            st.session_state["pipeline_active"] = False
+            
             with action_placeholder.container():
                 st.success("✅ **Projekt gotowy!**")
                 
@@ -480,21 +483,17 @@ if st.session_state.get("pipeline_active"):
                         for f in important_files:
                             st.markdown(f"- `{f}`")
                 
-                col1, col2 = st.columns(2)
-                if col1.button("🆕 Nowy projekt", key="btn_finish", use_container_width=True):
-                    st.session_state["messages"].append({"role": "assistant", "content": "Zadanie zakończone."})
-                    del st.session_state["graph_state"]
-                    st.session_state["pipeline_active"] = False
-                    st.rerun()
+                st.info("💬 Możesz teraz dodać kolejne funkcje - po prostu napisz co chcesz zmienić!", icon="✨")
                 
-                if col2.button("🔄 Kontynuuj pracę", key="btn_continue", use_container_width=True):
-                    # Nie usuwamy graph_state - zachowujemy pliki i context
-                    st.session_state["graph_state"]["plan_approved"] = False
-                    st.session_state["graph_state"]["feedback"] = None
-                    st.session_state["graph_state"]["next_node"] = "manager"
-                    st.session_state["graph_state"]["plan"] = None  # Reset planu
+                if st.button("🆕 Nowy projekt", key="btn_finish", use_container_width=True):
+                    # To samo co przycisk "➕ Nowy projekt" w sidebarze
+                    new_chat_id = create_new_chat()
+                    st.session_state["active_chat_id"] = new_chat_id
+                    st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
+                    st.session_state["current_chat_loaded"] = new_chat_id
+                    if "graph_state" in st.session_state:
+                        del st.session_state["graph_state"]
                     st.session_state["pipeline_active"] = False
-                    st.toast("Możesz dodać kolejne funkcje!", icon="✨")
                     st.rerun()
         else:
             with action_placeholder.container():

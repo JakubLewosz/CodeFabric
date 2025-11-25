@@ -20,12 +20,13 @@ def manager_node(state: AgentState):
     # === 1. NAJWAŻNIEJSZE: CZY MAMY SUKCES? ===
     if files and feedback and "APPROVE" in str(feedback).upper():
         print("✅ MANAGER: Projekt zatwierdzony.")
-        # NOWOŚĆ: Nie zwracamy end natychmiast - czekamy na kolejny prompt
-        # Ale resetujemy state żeby kolejny prompt był traktowany jako kontynuacja
+        # Resetuj state dla kolejnego prompta (w tym samym chacie)
         return {
             "next_node": "end",
-            "plan_approved": False,  # Reset dla kolejnego prompta
-            "feedback": None
+            "plan": None,
+            "plan_approved": False,
+            "feedback": None,
+            "revision_count": 0
         }
 
     # === 2. BEZPIECZNIK (LIMIT POPRAWEK) ===
@@ -74,7 +75,7 @@ Możliwe przyczyny:
 
     # Czekanie na zatwierdzenie planu (UI)
     if plan and not plan_approved:
-        # NOWOŚĆ: Jeśli to kontynuacja (są już pliki), auto-approve
+        # Auto-approve gdy są już pliki (kontynuacja projektu)
         if files and len(files) > 0:
             print("📋 MANAGER: Kontynuacja projektu - auto-zatwierdzam plan")
             return {
@@ -86,6 +87,7 @@ Możliwe przyczyny:
         if feedback:
             print("🔄 MANAGER: Plan wymaga poprawek → Planner")
             return {"next_node": "planner"}
+        
         print("⏸️ MANAGER: Czekam na zatwierdzenie planu przez użytkownika")
         return {"next_node": "end"}
 

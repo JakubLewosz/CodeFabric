@@ -15,5 +15,5 @@ class AgentState(TypedDict):
     # Konfiguracja modeli
     model_names: Dict[str, str]
     
-    # NOWOŚĆ: Workspace dla chatu (opcjonalne)
+    # Workspace dla chatu (opcjonalne)
     chat_workspace: Optional[str]
