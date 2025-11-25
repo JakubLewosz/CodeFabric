@@ -162,20 +162,27 @@ def coder_node(state: AgentState):
 
     # === 2. OKREŚLENIE TRYBU PRACY ===
     use_diff_mode = False
+    total_lines = 0
+    
+    # Policz linie tylko dla plików kodowych
+    if existing_files:
+        for f in existing_files:
+            if f.endswith(('.py', '.js', '.html', '.css', '.jsx', '.tsx')):
+                content = read_file(f)
+                total_lines += content.count('\n')
     
     if feedback and "REJECT" in str(feedback).upper():
         mode = "TRYB NAPRAWY (DEBUGGING)"
         task_desc = f"Tester zgłosił błędy:\n{feedback}\n\nTwoim zadaniem jest je naprawić."
         current_revisions += 1
-        # Przy naprawach - DIFF tylko jeśli projekt jest duży
-        use_diff_mode = len(existing_files) > 5
+        # DIFF tylko dla DUŻYCH projektów (>10 plików LUB >300 linii)
+        use_diff_mode = len(existing_files) > 10 or total_lines > 300
         
     elif existing_files:
         mode = "TRYB ROZWOJU (REFACTORING)"
         task_desc = "Zaimplementuj zmiany opisane w planie, modyfikując istniejący kod."
-        # DIFF tylko dla dużych projektów (>5 plików) lub gdy pliki są długie
-        total_lines = sum(read_file(f).count('\n') for f in existing_files if f.endswith(('.py', '.js', '.html')))
-        use_diff_mode = len(existing_files) > 5 or total_lines > 200
+        # DIFF dla średnich/dużych projektów
+        use_diff_mode = len(existing_files) > 10 or total_lines > 300
         
     else:
         mode = "TRYB TWORZENIA (GREENFIELD)"
@@ -183,9 +190,9 @@ def coder_node(state: AgentState):
 
     print(f"--- PROGRAMISTA ({model_name}): {mode} ---")
     if use_diff_mode:
-        print(f"→ Używam DIFF editing ({len(existing_files)} plików, ~{total_lines if 'total_lines' in locals() else '?'} linii)")
+        print(f"→ Używam DIFF editing ({len(existing_files)} plików, {total_lines} linii)")
     else:
-        print(f"→ Używam FULL REWRITE (mały projekt)")
+        print(f"→ Używam FULL REWRITE ({len(existing_files)} plików, {total_lines} linii - za mały projekt dla DIFF)")
 
     # === 3. PRZYGOTOWANIE PROMPTU ===
     
