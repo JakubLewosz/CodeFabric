@@ -203,7 +203,7 @@ def coder_node(state: AgentState):
     # === 3. PRZYGOTOWANIE PROMPTU ===
     
     if use_diff_mode:
-        sys_msg = SystemMessage(content=f"""
+        sys_msg = SystemMessage(content="""
 Jesteś Expert Software Engineerem specjalizującym się w chirurgicznych edycjach kodu.
 
 --- TRYB PRACY: DIFF EDITING ---
@@ -223,56 +223,54 @@ ZASADY KRYTYCZNE (PRZECZYTAJ 3 RAZY):
 4. NIE WYMYŚLAJ kodu w SEARCH - KOPIUJ CO WIDZISZ.
 5. NIE SKRACAJ - jeśli funkcja ma 10 linii, SEARCH musi mieć 10 linii.
 
-PRZYKŁAD DOBRY:
-### EDIT: game.py
-SEARCH:
-def spawn_food(self):
-    self.food_pos = [random.randint(0, 19), random.randint(0, 19)]
-REPLACE:
-def spawn_food(self):
-    self.food_pos = [random.randint(0, 19), random.randint(0, 19)]
-    self.food2_pos = [random.randint(0, 19), random.randint(0, 19)]
-### END_EDIT
+❗ KRYTYCZNE: INTEGRACJA ❗
+Jeśli dodajesz nową funkcjonalność (np. nowy obiekt, nową klasę):
+- Musisz zaktualizować WSZYSTKIE miejsca które jej używają
+- Przykład: Dodajesz blue_food? Musisz:
+  1. Dodać blue_food do food.py
+  2. Utworzyć instancję w main.py (np. blue_food = Food(color='blue'))
+  3. Dodać renderowanie w game loop (blue_food.draw())
+  4. Dodać kolizje (if snake.collides(blue_food): ...)
 
-PRZYKŁAD ZŁY (❌ NIE RÓB TEGO):
-### EDIT: game.py
-SEARCH:
-def spawn_food(self):
-    # spawn food
-REPLACE:
-def spawn_food(self):
-    # spawn two foods
-### END_EDIT
-☝️ To jest ZŁE bo SEARCH nie jest dokładnym kodem z pliku!
+Nie zapomnij o żadnym kroku integracji!
 
-JEŚLI NIE JESTEŚ PEWIEN DOKŁADNEGO KODU:
-Użyj trybu FULL REWRITE (### FILE: ... ### ENDFILE) zamiast EDIT.
-
-Teraz przeanalizuj kod i zaplanuj edycje.
+Teraz przeanalizuj kod i zaplanuj PEŁNĄ integrację z wysoką jakością.
 """)
     else:
-        sys_msg = SystemMessage(content=f"""
+        sys_msg = SystemMessage(content="""
 Jesteś Expert Software Engineerem. Twoim celem jest dostarczenie DZIAŁAJĄCEGO, KOMPLETNEGO kodu.
 
 --- ZASADY EDYCJI PLIKÓW (KRYTYCZNE) ---
 1. Jeśli edytujesz plik, musisz zwrócić jego PEŁNĄ, NOWĄ ZAWARTOŚĆ.
 2. ABSOLUTNY ZAKAZ używania skrótów: `// ... reszta kodu`, `# ... existing code`. TO PSUJE PLIK.
 3. Musisz zachować istniejące funkcjonalności, chyba że plan każe je usunąć.
-4. Upewnij się, że nowe funkcje są faktycznie WYWOŁYWANE w głównym kodzie.
 
---- FORMAT ODPOWIEDZI ---
-Krok 1: ANALIZA (Jako komentarz). Napisz krótko: co zmienisz, w którym miejscu.
-Krok 2: KOD. Użyj znaczników:
+❗ KRYTYCZNE: PEŁNA INTEGRACJA ❗
+Gdy dodajesz nową funkcjonalność (nowy obiekt, klasę, feature), musisz ją ZINTEGROWAĆ:
 
-### FILE: sciezka/plik.ext
-PEŁNY_KOD_PLIKU
-### ENDFILE
+Przykład zadania: "Dodaj niebieski owoc który daje 2 punkty"
 
-UWAGA: Jeśli plik ma 200 linii, musisz zwrócić WSZYSTKIE 200 linii (ze zmianami).
-""")
+✅ PEŁNA INTEGRACJA (POPRAWNIE):
+1. food.py: Zaktualizuj klasę Food(color='red', points=1)
+2. main.py inicjalizacja: Dodaj blue_food = Food(color='blue', points=2)
+3. main.py game loop: Dodaj blue_food.draw(screen)
+4. main.py kolizje: Dodaj if snake.collides(blue_food): score += blue_food.points
 
-    user_msg = HumanMessage(content=f"""
-TRYB PRACY: {mode}
+❌ NIEPEŁNA INTEGRACJA (BŁĄD):
+1. Tylko zaktualizować food.py
+2. Nie dodać blue_food do main.py
+3. Nie renderować blue_food
+→ Rezultat: Kod istnieje ale nic nie działa!
+
+ZASADA ZŁOTA: Każda nowa funkcja musi być:
+- Zdefiniowana (np. klasa)
+- Zainicjalizowana (np. blue_food = ...)
+- Użyta (np. draw(), collision check)
+
+⭐ JAKOŚĆ KODU (STANDARDS) ⭐
+
+1. **CZYTELNOŚĆ:**
+   - Nazwy: food_position, not fp
 
 PLAN ARCHITEKTA (CO ZROBIĆ):
 {plan}

@@ -117,6 +117,14 @@ def inject_custom_css():
 
 inject_custom_css()
 
+# === INICJALIZACJA AKTYWNEGO CHATU (MUSI BYĆ NA POCZĄTKU!) ===
+if "active_chat_id" not in st.session_state:
+    existing_chats = list_all_chats()
+    if existing_chats:
+        st.session_state["active_chat_id"] = existing_chats[0]['id']
+    else:
+        st.session_state["active_chat_id"] = create_new_chat()
+
 # --- FUNKCJA BACKUP DLA AKTYWNEGO CHATU ---
 def create_backup():
     """Tworzy backup workspace aktywnego chatu"""
@@ -278,18 +286,7 @@ with c1:
     st.title("CodeFabric AI")
     st.markdown("Twój autonomiczny zespół deweloperski.")
 
-# === INICJALIZACJA AKTYWNEGO CHATU ===
-if "active_chat_id" not in st.session_state:
-    # Sprawdź czy są jakieś chaty
-    existing_chats = list_all_chats()
-    if existing_chats:
-        # Użyj ostatniego
-        st.session_state["active_chat_id"] = existing_chats[0]['id']
-    else:
-        # Stwórz pierwszy chat
-        st.session_state["active_chat_id"] = create_new_chat()
-
-# Wczytaj stan aktywnego chatu
+# Wczytaj stan aktywnego chatu (inicjalizacja była na górze)
 active_chat_id = st.session_state["active_chat_id"]
 chat_state = load_chat_state(active_chat_id)
 

@@ -46,20 +46,44 @@ Zaplanuj PRECYZYJNE zmiany w kodzie, aby spełnić prośbę użytkownika.
    - Którą funkcję/klasę
    - Co dokładnie dodać/zmienić/usunąć
 
-=== PRZYKŁAD DOBREGO PLANU (EDYCJA) ===
+❗ KRYTYCZNE: MYŚL O PEŁNEJ INTEGRACJI ❗
+Gdy użytkownik prosi o nową funkcję (np. "dodaj niebieski owoc"):
+- Nie wystarczy tylko zmienić food.py
+- Musisz zaplanować integrację w WSZYSTKICH miejscach:
+  * Gdzie zdefiniować (food.py)
+  * Gdzie zainicjalizować (main.py: blue_food = ...)
+  * Gdzie renderować (main.py game loop: blue_food.draw())
+  * Gdzie obsłużyć logikę (main.py: kolizja, punkty)
+
+=== PRZYKŁAD DOBREGO PLANU (Z INTEGRACJĄ) ===
+Zadanie: "Dodaj niebieski owoc który daje 2 punkty"
 ```
-- main.py: 
-  * Dodaj zmienną 'score = 0' na początku klasy Game
-  * W metodzie update(): Dodaj 'self.score += 10' po kolizji
+- config.py (nowy plik):
+  * Dodaj stałe: GRID_SIZE = 20, RED_COLOR = (255,0,0), BLUE_COLOR = (0,0,255)
   
-- ui.py:
-  * W funkcji draw_hud(): Dodaj wyświetlanie score
-  * Użyj: font.render(f"Score: {{game.score}}", ...)
+- food.py:
+  * Dodaj parametr 'color' i 'points' do __init__
+  * Dodaj type hints: def __init__(self, color: str, points: int)
+  * self.color = color, self.points = points
+  
+- main.py inicjalizacja:
+  * Import z config.py
+  * Dodaj: red_food = Food(color='red', points=1)
+  * Dodaj: blue_food = Food(color='blue', points=2)
+  
+- main.py game loop:
+  * Dodaj: blue_food.draw(screen)
+  
+- main.py kolizje:
+  * Refactor: Stwórz funkcję check_food_collision(snake, foods_list)
+  * Użyj dla obu owocow zamiast duplikować kod
 ```
 
-=== PRZYKŁAD ZŁEGO PLANU ===
+⭐ JAKOŚĆ: Dodaj config.py dla stałych, unikaj duplikacji w kolizjach
+
+=== PRZYKŁAD ZŁEGO PLANU (BEZ INTEGRACJI) ===
+❌ "food.py: Dodaj blue_food" (i tyle - brak integracji!)
 ❌ "Zaktualizuj grę o system punktacji" (za ogólne)
-❌ "Dodaj kilka nowych funkcji" (nie wiadomo jakich)
 
 === FORMAT ODPOWIEDZI ===
 Odpowiedz TYLKO w formacie listy z konkretnymi instrukcjami.

@@ -79,45 +79,46 @@ KOD DO SPRAWDZENIA:
 
 === CHECKLIST KRYTYCZNY ===
 
-TYLKO KRYTYCZNE BŁĘDY (które sprawią że kod NIE ZADZIAŁA):
+CZĘŚĆ 1: CZY KOD DZIAŁA (MUST-HAVE)
+[ ] 1. PUNKT WEJŚCIA: Czy jest `if __name__ == "__main__":` lub podobny?
+[ ] 2. PĘTLE: Czy `while True` ma event handling lub break?
+[ ] 3. IMPORTY: Czy wszystkie używane biblioteki są zaimportowane?
+[ ] 4. GUI/GRY: Czy jest pętla zdarzeń i aktualizacja ekranu?
+[ ] 5. SKŁADNIA: Brak błędów składni?
 
-[ ] 1. PUNKT WEJŚCIA
-    - Czy jest `if __name__ == "__main__":` lub podobny mechanizm startu?
-
-[ ] 2. PĘTLE NIESKOŃCZONE
-    - Czy `while True` ma event handling lub break?
-
-[ ] 3. IMPORTY
-    - Czy wszystkie używane biblioteki są zaimportowane?
-
-[ ] 4. GUI/GRY (jeśli dotyczy)
-    - Czy jest pętla zdarzeń?
-    - Czy ekran jest aktualizowany?
-
-[ ] 5. SKŁADNIA
-    - Czy brak oczywistych błędów składni (brakujące dwukropki, nawiasy)?
+CZĘŚĆ 2: JAKOŚĆ KODU (NICE-TO-HAVE)
+[ ] 6. NAZWY: Czy zmienne mają sensowne nazwy? (nie: x, fp, d)
+[ ] 7. FUNKCJE: Czy funkcje są krótkie (<50 linii) i robią jedną rzecz?
+[ ] 8. MAGIC NUMBERS: Czy stałe są wyciągnięte na górę? (GRID_SIZE = 20)
+[ ] 9. ERROR HANDLING: Czy ryzykowne operacje (I/O) mają try-except?
+[ ] 10. DUPLIKACJA: Czy kod się powtarza? (DRY principle)
 
 === ZASADA OCENY ===
-**APPROVE** jeśli kod ZADZIAŁA (uruchomi się bez crash).
-**REJECT** tylko gdy kod się NIE URUCHOMI lub wywoła błąd.
 
-IGNORUJ:
-- Niedoskonałą logikę kolizji (jeśli jakaś jest)
-- Brak edge cases (jeśli podstawowa logika działa)
-- Suboptymalne rozwiązania (jeśli działają)
-- Braki w dokumentacji
+**APPROVE** jeśli:
+- Część 1 (MUST-HAVE): ✅ Wszystkie OK - kod zadziała
+- Część 2 (NICE-TO-HAVE): Opcjonalne sugestie
+
+**REJECT** jeśli:
+- Część 1 (MUST-HAVE): ❌ Coś nie działa - kod crashuje
+
+IGNORUJ: Niedoskonałości w Części 2 NIE SĄ powodem do REJECT.
+Możesz dodać sugestie ale daj APPROVE jeśli kod działa.
 
 === DECYZJA ===
 
 **APPROVE**
-Kod uruchomi się i będzie działał. [Opcjonalnie: drobne sugestie]
+Kod uruchomi się i będzie działał.
+[Opcjonalnie: Sugestie jakości:
+- Rozważ wyciągnięcie GRID_SIZE = 20 na stałą
+- Funkcja main() mogłaby być krótsza]
 
 LUB
 
 **REJECT**
 Kod NIE URUCHOMI SIĘ lub wywoła crash.
 Błąd: [KONKRETNY błąd który spowoduje crash]
-Lokalizacja: [plik.py, linia X]
+Lokalizacja: [plik.py, funkcja/linia]
 """)
 
     # === 6. WYWOŁANIE I DIAGNOSTYKA ===
