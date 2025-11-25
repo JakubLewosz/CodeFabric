@@ -73,49 +73,45 @@ KOD DO SPRAWDZENIA:
 
 === CHECKLIST KRYTYCZNY ===
 
+TYLKO KRYTYCZNE BŁĘDY (które sprawią że kod NIE ZADZIAŁA):
+
 [ ] 1. PUNKT WEJŚCIA
     - Czy jest `if __name__ == "__main__":` lub podobny mechanizm startu?
-    - Czy wiadomo, co uruchomić?
 
 [ ] 2. PĘTLE NIESKOŃCZONE
-    - Czy `while True` ma mechanizm wyjścia?
-    - Czy jest `sleep()` lub event handling?
+    - Czy `while True` ma event handling lub break?
 
 [ ] 3. IMPORTY
     - Czy wszystkie używane biblioteki są zaimportowane?
-    - Czy brak literówek w nazwach modułów?
 
 [ ] 4. GUI/GRY (jeśli dotyczy)
-    - Czy jest pętla zdarzeń (event loop)?
-    - Czy ekran jest aktualizowany (`.flip()`, `.update()`, render)?
+    - Czy jest pętla zdarzeń?
+    - Czy ekran jest aktualizowany?
 
-[ ] 5. ŚCIEŻKI DO PLIKÓW
-    - Czy kod odwołuje się do plików, które istnieją w projekcie?
-    - Czy nie ma hardcoded ścieżek systemowych?
+[ ] 5. SKŁADNIA
+    - Czy brak oczywistych błędów składni (brakujące dwukropki, nawiasy)?
 
-[ ] 6. LOGIKA
-    - Czy funkcje zwracają wartości, gdy powinny?
-    - Czy puste funkcje/klasy są placeholderami, czy błędem?
+=== ZASADA OCENY ===
+**APPROVE** jeśli kod ZADZIAŁA (uruchomi się bez crash).
+**REJECT** tylko gdy kod się NIE URUCHOMI lub wywoła błąd.
 
-[ ] 7. OBSŁUGA BŁĘDÓW
-    - Czy operacje I/O są w try-except?
-    - Czy są warunki obronne przed None/pustymi wartościami?
+IGNORUJ:
+- Niedoskonałą logikę kolizji (jeśli jakaś jest)
+- Brak edge cases (jeśli podstawowa logika działa)
+- Suboptymalne rozwiązania (jeśli działają)
+- Braki w dokumentacji
 
 === DECYZJA ===
-Odpowiedz TYLKO jednym z formatów:
 
 **APPROVE**
-Kod wygląda na działający. [Opcjonalnie: krótki komentarz]
+Kod uruchomi się i będzie działał. [Opcjonalnie: drobne sugestie]
 
 LUB
 
 **REJECT**
-Błąd: [KONKRETNY opis problemu]
-Lokalizacja: [plik.py, linia X lub nazwa funkcji]
-Rozwiązanie: [co trzeba zmienić]
-
-BĄDŹ SUROWY. Jeśli coś jest podejrzane, daj REJECT.
-Jeśli brakuje kluczowej logiki (pusta funkcja `pass`), to też REJECT.
+Kod NIE URUCHOMI SIĘ lub wywoła crash.
+Błąd: [KONKRETNY błąd który spowoduje crash]
+Lokalizacja: [plik.py, linia X]
 """)
 
     # === 6. WYWOŁANIE I DIAGNOSTYKA ===

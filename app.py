@@ -275,10 +275,13 @@ if st.session_state.get("pipeline_active"):
                     st.rerun()
                 
                 if col2.button("🔄 Kontynuuj pracę", key="btn_continue", use_container_width=True):
+                    # Nie usuwamy graph_state - zachowujemy pliki i context
                     st.session_state["graph_state"]["plan_approved"] = False
                     st.session_state["graph_state"]["feedback"] = None
                     st.session_state["graph_state"]["next_node"] = "manager"
+                    st.session_state["graph_state"]["plan"] = None  # Reset planu
                     st.session_state["pipeline_active"] = False
+                    st.toast("Możesz dodać kolejne funkcje!", icon="✨")
                     st.rerun()
         else:
             with action_placeholder.container():

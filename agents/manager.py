@@ -20,7 +20,13 @@ def manager_node(state: AgentState):
     # === 1. NAJWAŻNIEJSZE: CZY MAMY SUKCES? ===
     if files and feedback and "APPROVE" in str(feedback).upper():
         print("✅ MANAGER: Projekt zatwierdzony.")
-        return {"next_node": "end"}
+        # NOWOŚĆ: Nie zwracamy end natychmiast - czekamy na kolejny prompt
+        # Ale resetujemy state żeby kolejny prompt był traktowany jako kontynuacja
+        return {
+            "next_node": "end",
+            "plan_approved": False,  # Reset dla kolejnego prompta
+            "feedback": None
+        }
 
     # === 2. BEZPIECZNIK (LIMIT POPRAWEK) ===
     if revision_count >= 3:
