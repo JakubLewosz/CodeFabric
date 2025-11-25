@@ -105,8 +105,22 @@ def parse_and_save_files(ai_response: str):
     if not ai_response: 
         return []
 
-    pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
-    matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
+    # Próba 1: Standardowy format ### FILE: ... ### ENDFILE
+    pattern1 = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
+    matches = re.findall(pattern1, ai_response, re.DOTALL | re.IGNORECASE)
+    
+    # Próba 2: Bardziej elastyczny format (bez ###)
+    if not matches:
+        pattern2 = r"FILE:\s*([^\n]+)\n(.*?)(?=\nFILE:|\nENDFILE|$)"
+        matches = re.findall(pattern2, ai_response, re.DOTALL | re.IGNORECASE)
+    
+    # Próba 3: Format z blokami kodu ```python
+    if not matches:
+        pattern3 = r"```([a-z]+)\s*#\s*([^\n]+)\n(.*?)```"
+        matches = re.findall(pattern3, ai_response, re.DOTALL)
+        # Przetw. (lang, filename, content) -> (filename, content)
+        matches = [(f.strip(), c) for _, f, c in matches if f.strip()]
+    
     created_files = []
     
     if not matches and len(ai_response.strip()) > 50:
@@ -120,6 +134,7 @@ def parse_and_save_files(ai_response: str):
         filename = filename.strip()
         content = content.strip()
         
+        # Usuń markdown wrappery
         content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
         
@@ -240,22 +255,33 @@ Teraz przeanalizuj kod i zaplanuj PEŁNĄ integrację z wysoką jakością.
         sys_msg = SystemMessage(content="""
 Jesteś Expert Software Engineerem. Piszesz KOMPLETNY, DZIAŁAJĄCY kod.
 
-FORMAT:
-### FILE: plik.py
-[PEŁNA zawartość]
+⚠️ ABSOLUTNIE KRYTYCZNE - FORMAT ODPOWIEDZI ⚠️
+
+MUSISZ użyć DOKŁADNIE tego formatu (skopiuj znaczniki):
+
+### FILE: nazwa_pliku.py
+[cały kod tutaj]
 ### ENDFILE
 
+### FILE: inny_plik.py
+[cały kod tutaj]
+### ENDFILE
+
+❌ BEZ TEGO FORMATU KOD NIE ZOSTANIE ZAPISANY ❌
+✅ KAŻDY PLIK MUSI MIEĆ ### FILE: i ### ENDFILE
+
 ZASADY:
-1. Zwróć CAŁĄ zawartość pliku (nie skróty)
+1. Zwróć CAŁĄ zawartość pliku (nie używaj "..." ani "reszta kodu")
 2. Zachowaj istniejące funkcje
+3. Dodając nową funkcjonalność - zintegruj ją wszędzie
 
-INTEGRACJA - dodając blue_food:
-1. food.py: Dodaj color parameter
-2. main.py: blue_food = Food('blue', 2)
-3. main.py: blue_food.draw()
-4. main.py: kolizja z blue_food
+INTEGRACJA (przykład blue_food):
+1. food.py: Dodaj parametr color do klasy Food
+2. main.py: Stwórz instancję blue_food = Food('blue', x, y)
+3. main.py: Wywołaj blue_food.draw() w game loop
+4. main.py: Dodaj kolizję if snake.collides(blue_food): ...
 
-Rozpocznij od planu integracji.
+PAMIĘTAJ: Użyj znaczników ### FILE: i ### ENDFILE!
 """)
 
     # USER MESSAGE (wspólny dla obu trybów)
