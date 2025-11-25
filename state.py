@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated, List, Dict
+from typing import TypedDict, Annotated, List, Dict, Optional
 import operator
 
 class AgentState(TypedDict):
@@ -9,9 +9,11 @@ class AgentState(TypedDict):
     revision_count: int
     feedback: str
     
-    # --- NOWE POLE ---
     # Czy użytkownik kliknął "Zatwierdź Plan"?
     plan_approved: bool
     
     # Konfiguracja modeli
     model_names: Dict[str, str]
+    
+    # NOWOŚĆ: Workspace dla chatu (opcjonalne)
+    chat_workspace: Optional[str]

@@ -25,6 +25,12 @@ def smart_truncate(content: str, max_length: int = 8000) -> str:
 
 def reviewer_node(state: AgentState):
     current_files = state.get("current_files", [])
+    chat_workspace = state.get("chat_workspace")  # NOWOŚĆ
+    
+    # Ustaw workspace jeśli podany
+    if chat_workspace:
+        import tools.file_ops as file_ops_module
+        file_ops_module.WORKSPACE_DIR = chat_workspace
     
     if not current_files:
         return {"feedback": "Brak plików.", "messages": []}

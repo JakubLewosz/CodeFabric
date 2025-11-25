@@ -2,19 +2,23 @@ import os
 import shutil
 import time
 
-# Katalog roboczy
+# Katalog roboczy (może być zmieniony dynamicznie)
 WORKSPACE_DIR = "./workspace"
-BACKUP_DIR = "./backups"
+
+def get_workspace_dir():
+    """Zwraca aktualny workspace (może być podmieniony)"""
+    return WORKSPACE_DIR
 
 def write_file(filename: str, content: str) -> str:
     """Zapisuje treść do pliku, tworząc niezbędne podkatalogi."""
     try:
+        workspace = get_workspace_dir()
         filename = filename.strip().replace("\\", "/")
         if filename.startswith("/"): 
             filename = filename[1:]
         
-        full_path = os.path.abspath(os.path.join(WORKSPACE_DIR, filename))
-        workspace_abs = os.path.abspath(WORKSPACE_DIR)
+        full_path = os.path.abspath(os.path.join(workspace, filename))
+        workspace_abs = os.path.abspath(workspace)
 
         if not full_path.startswith(workspace_abs):
             return f"Error: Próba zapisu poza workspace: {filename}"
@@ -34,8 +38,9 @@ def write_file(filename: str, content: str) -> str:
 def read_file(filename: str) -> str:
     """Odczytuje treść pliku z workspace."""
     try:
-        full_path = os.path.abspath(os.path.join(WORKSPACE_DIR, filename))
-        workspace_abs = os.path.abspath(WORKSPACE_DIR)
+        workspace = get_workspace_dir()
+        full_path = os.path.abspath(os.path.join(workspace, filename))
+        workspace_abs = os.path.abspath(workspace)
         
         if not full_path.startswith(workspace_abs):
             return "Error: Security violation."
@@ -48,16 +53,21 @@ def read_file(filename: str) -> str:
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
-def list_files(startpath=WORKSPACE_DIR) -> str:
+def list_files(startpath=None) -> str:
     """Zwraca sformatowany string dla człowieka (do UI)."""
+    if startpath is None:
+        startpath = get_workspace_dir()
     files = get_all_file_paths(startpath)
     return ", ".join(files) if files else "No files in workspace."
 
-def get_all_file_paths(startpath=WORKSPACE_DIR) -> list[str]:
+def get_all_file_paths(startpath=None) -> list[str]:
     """
     Zwraca czystą listę ścieżek dla Agentów.
     Używane przez Codera do skanowania projektu.
     """
+    if startpath is None:
+        startpath = get_workspace_dir()
+        
     file_list = []
     try:
         if not os.path.exists(startpath): 

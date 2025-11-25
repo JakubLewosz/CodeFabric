@@ -2,9 +2,81 @@ import streamlit as st
 import os
 import time
 import shutil
+import json
+import uuid
+from datetime import datetime
 from graph.workflow import app
 from langchain_core.messages import HumanMessage
 from tools.file_ops import list_files, read_file, get_all_file_paths, write_file
+
+# --- KONFIGURACJA CHATÓW ---
+CHATS_DIR = "./chats"
+os.makedirs(CHATS_DIR, exist_ok=True)
+
+def get_chat_workspace(chat_id: str) -> str:
+    """Zwraca ścieżkę do workspace danego chatu"""
+    return os.path.join(CHATS_DIR, chat_id, "workspace")
+
+def get_chat_state_file(chat_id: str) -> str:
+    """Zwraca ścieżkę do pliku state danego chatu"""
+    return os.path.join(CHATS_DIR, chat_id, "state.json")
+
+def save_chat_state(chat_id: str, state: dict):
+    """Zapisuje stan chatu do pliku"""
+    os.makedirs(os.path.join(CHATS_DIR, chat_id), exist_ok=True)
+    with open(get_chat_state_file(chat_id), 'w', encoding='utf-8') as f:
+        json.dump(state, f, ensure_ascii=False, indent=2, default=str)
+
+def load_chat_state(chat_id: str) -> dict:
+    """Wczytuje stan chatu z pliku"""
+    state_file = get_chat_state_file(chat_id)
+    if os.path.exists(state_file):
+        with open(state_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+def list_all_chats() -> list:
+    """Zwraca listę wszystkich chatów (id, nazwa, data)"""
+    chats = []
+    if not os.path.exists(CHATS_DIR):
+        return chats
+    
+    for chat_id in os.listdir(CHATS_DIR):
+        state_file = get_chat_state_file(chat_id)
+        if os.path.exists(state_file):
+            state = load_chat_state(chat_id)
+            chats.append({
+                'id': chat_id,
+                'name': state.get('name', 'Nowy projekt'),
+                'updated': state.get('updated', '')
+            })
+    
+    # Sortuj po dacie (najnowsze pierwsze)
+    chats.sort(key=lambda x: x['updated'], reverse=True)
+    return chats
+
+def generate_chat_name(first_message: str) -> str:
+    """Generuje nazwę chatu na podstawie pierwszego prompta"""
+    # Weź pierwsze 30 znaków, usuń znaki specjalne
+    name = first_message[:30].strip()
+    # Usuń wielokrotne spacje
+    name = ' '.join(name.split())
+    return name if name else "Nowy projekt"
+
+def create_new_chat() -> str:
+    """Tworzy nowy chat i zwraca jego ID"""
+    chat_id = str(uuid.uuid4())[:8]  # Krótkie ID
+    os.makedirs(get_chat_workspace(chat_id), exist_ok=True)
+    
+    # Zapisz pusty stan
+    save_chat_state(chat_id, {
+        'name': 'Nowy projekt',
+        'created': datetime.now().isoformat(),
+        'updated': datetime.now().isoformat(),
+        'messages': []
+    })
+    
+    return chat_id
 
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(
@@ -45,14 +117,20 @@ def inject_custom_css():
 
 inject_custom_css()
 
-# --- FUNKCJA BACKUP ---
+# --- FUNKCJA BACKUP DLA AKTYWNEGO CHATU ---
 def create_backup():
-    """Tworzy backup aktualnego workspace przed zmianami"""
-    if os.path.exists("./workspace") and os.listdir("./workspace"):
+    """Tworzy backup workspace aktywnego chatu"""
+    chat_id = st.session_state.get("active_chat_id")
+    if not chat_id:
+        return None
+    
+    chat_workspace = get_chat_workspace(chat_id)
+    if os.path.exists(chat_workspace) and os.listdir(chat_workspace):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        backup_path = f"./backups/backup_{timestamp}"
-        os.makedirs("./backups", exist_ok=True)
-        shutil.copytree("./workspace", backup_path)
+        backups_dir = os.path.join(CHATS_DIR, chat_id, "backups")
+        os.makedirs(backups_dir, exist_ok=True)
+        backup_path = os.path.join(backups_dir, f"backup_{timestamp}")
+        shutil.copytree(chat_workspace, backup_path)
         return backup_path
     return None
 
@@ -60,6 +138,68 @@ def create_backup():
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/artificial-intelligence.png", width=60)
     st.markdown("### **CodeFabric**")
+    st.divider()
+    
+    # === SEKCJA CHATÓW ===
+    st.markdown("#### 💬 Projekty")
+    
+    # Przycisk nowego chatu
+    if st.button("➕ Nowy projekt", use_container_width=True, type="primary"):
+        new_chat_id = create_new_chat()
+        st.session_state["active_chat_id"] = new_chat_id
+        st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
+        st.session_state["current_chat_loaded"] = new_chat_id
+        if "graph_state" in st.session_state:
+            del st.session_state["graph_state"]
+        st.session_state["pipeline_active"] = False
+        st.rerun()
+    
+    # Lista chatów
+    all_chats = list_all_chats()
+    if all_chats:
+        st.markdown("**Ostatnie:**")
+        for chat in all_chats[:5]:  # Pokaż 5 ostatnich
+            is_active = chat['id'] == st.session_state["active_chat_id"]
+            
+            # Skróć nazwę jeśli za długa
+            display_name = chat['name'][:25] + "..." if len(chat['name']) > 25 else chat['name']
+            
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                if st.button(
+                    f"{'✓ ' if is_active else '  '}{display_name}",
+                    key=f"chat_{chat['id']}",
+                    use_container_width=True,
+                    disabled=is_active
+                ):
+                    # Zapisz obecny chat
+                    save_chat_state(st.session_state["active_chat_id"], {
+                        'name': chat_state.get('name', 'Nowy projekt') if chat_state else 'Nowy projekt',
+                        'updated': datetime.now().isoformat(),
+                        'messages': st.session_state.get("messages", []),
+                        'graph_state': st.session_state.get("graph_state", {})
+                    })
+                    
+                    # Przełącz na nowy
+                    st.session_state["active_chat_id"] = chat['id']
+                    del st.session_state["current_chat_loaded"]
+                    if "graph_state" in st.session_state:
+                        del st.session_state["graph_state"]
+                    st.rerun()
+            
+            with col2:
+                if st.button("🗑️", key=f"del_{chat['id']}", disabled=is_active):
+                    # Usuń chat
+                    shutil.rmtree(os.path.join(CHATS_DIR, chat['id']))
+                    if is_active and len(all_chats) > 1:
+                        # Przełącz na inny chat
+                        other_chat = [c for c in all_chats if c['id'] != chat['id']][0]
+                        st.session_state["active_chat_id"] = other_chat['id']
+                        del st.session_state["current_chat_loaded"]
+                    st.rerun()
+    else:
+        st.info("Brak projektów", icon="📝")
+    
     st.divider()
     
     st.markdown("#### 🧠 Wybór Mózgów")
@@ -72,20 +212,33 @@ with st.sidebar:
     if col1.button("🔄 Odśwież", use_container_width=True):
         st.rerun()
     
-    # NOWOŚĆ: Przycisk Rollback
+    # NOWOŚĆ: Rollback dla aktywnego chatu
     if col2.button("⏮️ Rollback", use_container_width=True):
-        backups = sorted([d for d in os.listdir("./backups") if d.startswith("backup_")], reverse=True) if os.path.exists("./backups") else []
+        chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
+        backups_dir = os.path.join(CHATS_DIR, st.session_state["active_chat_id"], "backups")
+        
+        backups = sorted([d for d in os.listdir(backups_dir) if d.startswith("backup_")], reverse=True) if os.path.exists(backups_dir) else []
         if backups:
-            latest = f"./backups/{backups[0]}"
-            shutil.rmtree("./workspace")
-            shutil.copytree(latest, "./workspace")
+            latest = os.path.join(backups_dir, backups[0])
+            if os.path.exists(chat_workspace):
+                shutil.rmtree(chat_workspace)
+            shutil.copytree(latest, chat_workspace)
             st.success(f"Przywrócono: {backups[0]}")
             time.sleep(1)
             st.rerun()
         else:
             st.warning("Brak backupów")
 
+    # Lista plików aktywnego chatu
+    chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
+    
+    # Tymczasowo zmień working directory dla file_ops
+    original_workspace = "./workspace"
+    import tools.file_ops as file_ops_module
+    file_ops_module.WORKSPACE_DIR = chat_workspace
+    
     files_str = list_files()
+    
     if "No files" not in files_str and files_str.strip():
         file_list = files_str.split(", ")
         selected_file = st.selectbox("Podgląd:", file_list, index=None)
@@ -94,18 +247,30 @@ with st.sidebar:
             st.code(content, language="python", line_numbers=True)
     else:
         st.info("Pusto.", icon="ℹ️")
+    
+    # Przywróć oryginalny workspace
+    file_ops_module.WORKSPACE_DIR = original_workspace
 
     st.divider()
     
-    # NOWOŚĆ: Informacja o backupach
-    if os.path.exists("./backups"):
-        backup_count = len([d for d in os.listdir("./backups") if d.startswith("backup_")])
+    # Informacja o backupach aktywnego chatu
+    backups_dir = os.path.join(CHATS_DIR, st.session_state.get("active_chat_id", ""), "backups")
+    if os.path.exists(backups_dir):
+        backup_count = len([d for d in os.listdir(backups_dir) if d.startswith("backup_")])
         st.caption(f"💾 Backupy: {backup_count}")
     
     if st.button("📦 Pobierz ZIP", use_container_width=True):
-        shutil.make_archive("projekt", 'zip', "./workspace")
-        with open("projekt.zip", "rb") as f:
-            st.download_button("📥 Pobierz", f, "projekt.zip", "application/zip", use_container_width=True)
+        chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
+        active_chat_state = load_chat_state(st.session_state["active_chat_id"])
+        chat_name = active_chat_state.get('name', 'projekt') if active_chat_state else 'projekt'
+        zip_name = chat_name.replace(' ', '_').replace('/', '_')
+        
+        if os.path.exists(chat_workspace) and os.listdir(chat_workspace):
+            shutil.make_archive(zip_name, 'zip', chat_workspace)
+            with open(f"{zip_name}.zip", "rb") as f:
+                st.download_button("📥 Pobierz", f, f"{zip_name}.zip", "application/zip", use_container_width=True)
+        else:
+            st.warning("Brak plików do spakowania")
 
 # --- GŁÓWNY CZAT ---
 c1, c2 = st.columns([3, 1])
@@ -113,8 +278,29 @@ with c1:
     st.title("CodeFabric AI")
     st.markdown("Twój autonomiczny zespół deweloperski.")
 
-if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
+# === INICJALIZACJA AKTYWNEGO CHATU ===
+if "active_chat_id" not in st.session_state:
+    # Sprawdź czy są jakieś chaty
+    existing_chats = list_all_chats()
+    if existing_chats:
+        # Użyj ostatniego
+        st.session_state["active_chat_id"] = existing_chats[0]['id']
+    else:
+        # Stwórz pierwszy chat
+        st.session_state["active_chat_id"] = create_new_chat()
+
+# Wczytaj stan aktywnego chatu
+active_chat_id = st.session_state["active_chat_id"]
+chat_state = load_chat_state(active_chat_id)
+
+if "messages" not in st.session_state or st.session_state.get("current_chat_loaded") != active_chat_id:
+    # Wczytaj wiadomości z pliku
+    if chat_state and 'messages' in chat_state:
+        st.session_state["messages"] = chat_state['messages']
+    else:
+        st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
+    
+    st.session_state["current_chat_loaded"] = active_chat_id
     st.session_state["pipeline_active"] = False
 
 for msg in st.session_state["messages"]:
@@ -129,10 +315,24 @@ if user_input:
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(user_input)
     
-    # NOWOŚĆ: Twórz backup przed każdą nową iteracją
+    # Backup przed każdą nową iteracją
     backup_path = create_backup()
     if backup_path:
         st.toast(f"💾 Backup utworzony", icon="✅")
+    
+    # Generuj nazwę chatu z pierwszego prompta
+    active_chat_state = load_chat_state(st.session_state["active_chat_id"])
+    if active_chat_state and active_chat_state.get('name') == 'Nowy projekt':
+        # To pierwszy prompt - generuj nazwę
+        new_name = generate_chat_name(user_input)
+        active_chat_state['name'] = new_name
+        save_chat_state(st.session_state["active_chat_id"], active_chat_state)
+    
+    # Zapisz wiadomości do state
+    if active_chat_state:
+        active_chat_state['messages'] = st.session_state["messages"]
+        active_chat_state['updated'] = datetime.now().isoformat()
+        save_chat_state(st.session_state["active_chat_id"], active_chat_state)
     
     st.session_state["pipeline_active"] = True
     if "graph_state" in st.session_state: 
@@ -143,7 +343,19 @@ if user_input:
 if st.session_state.get("pipeline_active"):
     
     if "graph_state" not in st.session_state:
+        # Pobierz pliki z workspace aktywnego chatu
+        chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
+        
+        # Tymczasowo zmień workspace dla file_ops
+        import tools.file_ops as file_ops_module
+        original_ws = file_ops_module.WORKSPACE_DIR
+        file_ops_module.WORKSPACE_DIR = chat_workspace
+        
         existing_files = get_all_file_paths()
+        
+        # Przywróć
+        file_ops_module.WORKSPACE_DIR = original_ws
+        
         st.session_state["graph_state"] = {
             "messages": [HumanMessage(content=st.session_state["messages"][-1]["content"])],
             "current_files": existing_files,
@@ -152,7 +364,8 @@ if st.session_state.get("pipeline_active"):
             "feedback": None,
             "revision_count": 0,
             "next_node": "manager",
-            "model_names": {"chat": chat_model, "coder": coder_model}
+            "model_names": {"chat": chat_model, "coder": coder_model},
+            "chat_workspace": chat_workspace  # NOWOŚĆ: Przekaż workspace do agentów
         }
 
     status_placeholder = st.empty()

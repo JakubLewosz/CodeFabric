@@ -74,6 +74,15 @@ Możliwe przyczyny:
 
     # Czekanie na zatwierdzenie planu (UI)
     if plan and not plan_approved:
+        # NOWOŚĆ: Jeśli to kontynuacja (są już pliki), auto-approve
+        if files and len(files) > 0:
+            print("📋 MANAGER: Kontynuacja projektu - auto-zatwierdzam plan")
+            return {
+                "next_node": "coder",
+                "plan_approved": True
+            }
+        
+        # Nowy projekt - czekaj na użytkownika
         if feedback:
             print("🔄 MANAGER: Plan wymaga poprawek → Planner")
             return {"next_node": "planner"}

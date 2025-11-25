@@ -137,6 +137,12 @@ def coder_node(state: AgentState):
     plan = state.get("plan", "Brak planu.")
     feedback = state.get("feedback", "")
     current_revisions = state.get("revision_count", 0)
+    chat_workspace = state.get("chat_workspace")  # NOWOŚĆ
+    
+    # Ustaw workspace jeśli podany
+    if chat_workspace:
+        import tools.file_ops as file_ops_module
+        file_ops_module.WORKSPACE_DIR = chat_workspace
     
     model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
     llm = get_llm(model_name, temperature=0.0, num_ctx=32768) 
