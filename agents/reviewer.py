@@ -25,12 +25,6 @@ def smart_truncate(content: str, max_length: int = 8000) -> str:
 
 def reviewer_node(state: AgentState):
     current_files = state.get("current_files", [])
-    chat_workspace = state.get("chat_workspace")  # NOWOŚĆ
-    
-    # Ustaw workspace jeśli podany
-    if chat_workspace:
-        import tools.file_ops as file_ops_module
-        file_ops_module.WORKSPACE_DIR = chat_workspace
     
     if not current_files:
         return {"feedback": "Brak plików.", "messages": []}
@@ -79,46 +73,49 @@ KOD DO SPRAWDZENIA:
 
 === CHECKLIST KRYTYCZNY ===
 
-CZĘŚĆ 1: CZY KOD DZIAŁA (MUST-HAVE)
-[ ] 1. PUNKT WEJŚCIA: Czy jest `if __name__ == "__main__":` lub podobny?
-[ ] 2. PĘTLE: Czy `while True` ma event handling lub break?
-[ ] 3. IMPORTY: Czy wszystkie używane biblioteki są zaimportowane?
-[ ] 4. GUI/GRY: Czy jest pętla zdarzeń i aktualizacja ekranu?
-[ ] 5. SKŁADNIA: Brak błędów składni?
+[ ] 1. PUNKT WEJŚCIA
+    - Czy jest `if __name__ == "__main__":` lub podobny mechanizm startu?
+    - Czy wiadomo, co uruchomić?
 
-CZĘŚĆ 2: JAKOŚĆ KODU (NICE-TO-HAVE)
-[ ] 6. NAZWY: Czy zmienne mają sensowne nazwy? (nie: x, fp, d)
-[ ] 7. FUNKCJE: Czy funkcje są krótkie (<50 linii) i robią jedną rzecz?
-[ ] 8. MAGIC NUMBERS: Czy stałe są wyciągnięte na górę? (GRID_SIZE = 20)
-[ ] 9. ERROR HANDLING: Czy ryzykowne operacje (I/O) mają try-except?
-[ ] 10. DUPLIKACJA: Czy kod się powtarza? (DRY principle)
+[ ] 2. PĘTLE NIESKOŃCZONE
+    - Czy `while True` ma mechanizm wyjścia?
+    - Czy jest `sleep()` lub event handling?
 
-=== ZASADA OCENY ===
+[ ] 3. IMPORTY
+    - Czy wszystkie używane biblioteki są zaimportowane?
+    - Czy brak literówek w nazwach modułów?
 
-**APPROVE** jeśli:
-- Część 1 (MUST-HAVE): ✅ Wszystkie OK - kod zadziała
-- Część 2 (NICE-TO-HAVE): Opcjonalne sugestie
+[ ] 4. GUI/GRY (jeśli dotyczy)
+    - Czy jest pętla zdarzeń (event loop)?
+    - Czy ekran jest aktualizowany (`.flip()`, `.update()`, render)?
 
-**REJECT** jeśli:
-- Część 1 (MUST-HAVE): ❌ Coś nie działa - kod crashuje
+[ ] 5. ŚCIEŻKI DO PLIKÓW
+    - Czy kod odwołuje się do plików, które istnieją w projekcie?
+    - Czy nie ma hardcoded ścieżek systemowych?
 
-IGNORUJ: Niedoskonałości w Części 2 NIE SĄ powodem do REJECT.
-Możesz dodać sugestie ale daj APPROVE jeśli kod działa.
+[ ] 6. LOGIKA
+    - Czy funkcje zwracają wartości, gdy powinny?
+    - Czy puste funkcje/klasy są placeholderami, czy błędem?
+
+[ ] 7. OBSŁUGA BŁĘDÓW
+    - Czy operacje I/O są w try-except?
+    - Czy są warunki obronne przed None/pustymi wartościami?
 
 === DECYZJA ===
+Odpowiedz TYLKO jednym z formatów:
 
 **APPROVE**
-Kod uruchomi się i będzie działał.
-[Opcjonalnie: Sugestie jakości:
-- Rozważ wyciągnięcie GRID_SIZE = 20 na stałą
-- Funkcja main() mogłaby być krótsza]
+Kod wygląda na działający. [Opcjonalnie: krótki komentarz]
 
 LUB
 
 **REJECT**
-Kod NIE URUCHOMI SIĘ lub wywoła crash.
-Błąd: [KONKRETNY błąd który spowoduje crash]
-Lokalizacja: [plik.py, funkcja/linia]
+Błąd: [KONKRETNY opis problemu]
+Lokalizacja: [plik.py, linia X lub nazwa funkcji]
+Rozwiązanie: [co trzeba zmienić]
+
+BĄDŹ SUROWY. Jeśli coś jest podejrzane, daj REJECT.
+Jeśli brakuje kluczowej logiki (pusta funkcja `pass`), to też REJECT.
 """)
 
     # === 6. WYWOŁANIE I DIAGNOSTYKA ===

@@ -105,22 +105,8 @@ def parse_and_save_files(ai_response: str):
     if not ai_response: 
         return []
 
-    # Próba 1: Standardowy format ### FILE: ... ### ENDFILE
-    pattern1 = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
-    matches = re.findall(pattern1, ai_response, re.DOTALL | re.IGNORECASE)
-    
-    # Próba 2: Bardziej elastyczny format (bez ###)
-    if not matches:
-        pattern2 = r"FILE:\s*([^\n]+)\n(.*?)(?=\nFILE:|\nENDFILE|$)"
-        matches = re.findall(pattern2, ai_response, re.DOTALL | re.IGNORECASE)
-    
-    # Próba 3: Format z blokami kodu ```python
-    if not matches:
-        pattern3 = r"```([a-z]+)\s*#\s*([^\n]+)\n(.*?)```"
-        matches = re.findall(pattern3, ai_response, re.DOTALL)
-        # Przetw. (lang, filename, content) -> (filename, content)
-        matches = [(f.strip(), c) for _, f, c in matches if f.strip()]
-    
+    pattern = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
+    matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
     created_files = []
     
     if not matches and len(ai_response.strip()) > 50:
@@ -134,7 +120,6 @@ def parse_and_save_files(ai_response: str):
         filename = filename.strip()
         content = content.strip()
         
-        # Usuń markdown wrappery
         content = re.sub(r"^```[a-zA-Z]*\n", "", content)
         content = re.sub(r"\n```$", "", content)
         
@@ -152,12 +137,6 @@ def coder_node(state: AgentState):
     plan = state.get("plan", "Brak planu.")
     feedback = state.get("feedback", "")
     current_revisions = state.get("revision_count", 0)
-    chat_workspace = state.get("chat_workspace")  # NOWOŚĆ
-    
-    # Ustaw workspace jeśli podany
-    if chat_workspace:
-        import tools.file_ops as file_ops_module
-        file_ops_module.WORKSPACE_DIR = chat_workspace
     
     model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
     llm = get_llm(model_name, temperature=0.0, num_ctx=32768) 
@@ -183,27 +162,20 @@ def coder_node(state: AgentState):
 
     # === 2. OKREŚLENIE TRYBU PRACY ===
     use_diff_mode = False
-    total_lines = 0
-    
-    # Policz linie tylko dla plików kodowych
-    if existing_files:
-        for f in existing_files:
-            if f.endswith(('.py', '.js', '.html', '.css', '.jsx', '.tsx')):
-                content = read_file(f)
-                total_lines += content.count('\n')
     
     if feedback and "REJECT" in str(feedback).upper():
         mode = "TRYB NAPRAWY (DEBUGGING)"
         task_desc = f"Tester zgłosił błędy:\n{feedback}\n\nTwoim zadaniem jest je naprawić."
         current_revisions += 1
-        # DIFF tylko dla DUŻYCH projektów (>10 plików LUB >300 linii)
-        use_diff_mode = len(existing_files) > 10 or total_lines > 300
+        # Przy naprawach - DIFF tylko jeśli projekt jest duży
+        use_diff_mode = len(existing_files) > 5
         
     elif existing_files:
         mode = "TRYB ROZWOJU (REFACTORING)"
         task_desc = "Zaimplementuj zmiany opisane w planie, modyfikując istniejący kod."
-        # DIFF dla średnich/dużych projektów
-        use_diff_mode = len(existing_files) > 10 or total_lines > 300
+        # DIFF tylko dla dużych projektów (>5 plików) lub gdy pliki są długie
+        total_lines = sum(read_file(f).count('\n') for f in existing_files if f.endswith(('.py', '.js', '.html')))
+        use_diff_mode = len(existing_files) > 5 or total_lines > 200
         
     else:
         mode = "TRYB TWORZENIA (GREENFIELD)"
@@ -211,14 +183,14 @@ def coder_node(state: AgentState):
 
     print(f"--- PROGRAMISTA ({model_name}): {mode} ---")
     if use_diff_mode:
-        print(f"→ Używam DIFF editing ({len(existing_files)} plików, {total_lines} linii)")
+        print(f"→ Używam DIFF editing ({len(existing_files)} plików, ~{total_lines if 'total_lines' in locals() else '?'} linii)")
     else:
-        print(f"→ Używam FULL REWRITE ({len(existing_files)} plików, {total_lines} linii - za mały projekt dla DIFF)")
+        print(f"→ Używam FULL REWRITE (mały projekt)")
 
     # === 3. PRZYGOTOWANIE PROMPTU ===
     
     if use_diff_mode:
-        sys_msg = SystemMessage(content="""
+        sys_msg = SystemMessage(content=f"""
 Jesteś Expert Software Engineerem specjalizującym się w chirurgicznych edycjach kodu.
 
 --- TRYB PRACY: DIFF EDITING ---
@@ -238,66 +210,67 @@ ZASADY KRYTYCZNE (PRZECZYTAJ 3 RAZY):
 4. NIE WYMYŚLAJ kodu w SEARCH - KOPIUJ CO WIDZISZ.
 5. NIE SKRACAJ - jeśli funkcja ma 10 linii, SEARCH musi mieć 10 linii.
 
-❗ KRYTYCZNE: INTEGRACJA ❗
-Jeśli dodajesz nową funkcjonalność (np. nowy obiekt, nową klasę):
-- Musisz zaktualizować WSZYSTKIE miejsca które jej używają
-- Przykład: Dodajesz blue_food? Musisz:
-  1. Dodać blue_food do food.py
-  2. Utworzyć instancję w main.py (np. blue_food = Food(color='blue'))
-  3. Dodać renderowanie w game loop (blue_food.draw())
-  4. Dodać kolizje (if snake.collides(blue_food): ...)
+PRZYKŁAD DOBRY:
+### EDIT: game.py
+SEARCH:
+def spawn_food(self):
+    self.food_pos = [random.randint(0, 19), random.randint(0, 19)]
+REPLACE:
+def spawn_food(self):
+    self.food_pos = [random.randint(0, 19), random.randint(0, 19)]
+    self.food2_pos = [random.randint(0, 19), random.randint(0, 19)]
+### END_EDIT
 
-Nie zapomnij o żadnym kroku integracji!
+PRZYKŁAD ZŁY (❌ NIE RÓB TEGO):
+### EDIT: game.py
+SEARCH:
+def spawn_food(self):
+    # spawn food
+REPLACE:
+def spawn_food(self):
+    # spawn two foods
+### END_EDIT
+☝️ To jest ZŁE bo SEARCH nie jest dokładnym kodem z pliku!
 
-Teraz przeanalizuj kod i zaplanuj PEŁNĄ integrację z wysoką jakością.
+JEŚLI NIE JESTEŚ PEWIEN DOKŁADNEGO KODU:
+Użyj trybu FULL REWRITE (### FILE: ... ### ENDFILE) zamiast EDIT.
+
+Teraz przeanalizuj kod i zaplanuj edycje.
 """)
     else:
-        sys_msg = SystemMessage(content="""
-Jesteś Expert Software Engineerem. Piszesz KOMPLETNY, DZIAŁAJĄCY kod.
+        sys_msg = SystemMessage(content=f"""
+Jesteś Expert Software Engineerem. Twoim celem jest dostarczenie DZIAŁAJĄCEGO, KOMPLETNEGO kodu.
 
-⚠️ ABSOLUTNIE KRYTYCZNE - FORMAT ODPOWIEDZI ⚠️
+--- ZASADY EDYCJI PLIKÓW (KRYTYCZNE) ---
+1. Jeśli edytujesz plik, musisz zwrócić jego PEŁNĄ, NOWĄ ZAWARTOŚĆ.
+2. ABSOLUTNY ZAKAZ używania skrótów: `// ... reszta kodu`, `# ... existing code`. TO PSUJE PLIK.
+3. Musisz zachować istniejące funkcjonalności, chyba że plan każe je usunąć.
+4. Upewnij się, że nowe funkcje są faktycznie WYWOŁYWANE w głównym kodzie.
 
-MUSISZ użyć DOKŁADNIE tego formatu (skopiuj znaczniki):
+--- FORMAT ODPOWIEDZI ---
+Krok 1: ANALIZA (Jako komentarz). Napisz krótko: co zmienisz, w którym miejscu.
+Krok 2: KOD. Użyj znaczników:
 
-### FILE: nazwa_pliku.py
-[cały kod tutaj]
+### FILE: sciezka/plik.ext
+PEŁNY_KOD_PLIKU
 ### ENDFILE
 
-### FILE: inny_plik.py
-[cały kod tutaj]
-### ENDFILE
-
-❌ BEZ TEGO FORMATU KOD NIE ZOSTANIE ZAPISANY ❌
-✅ KAŻDY PLIK MUSI MIEĆ ### FILE: i ### ENDFILE
-
-ZASADY:
-1. Zwróć CAŁĄ zawartość pliku (nie używaj "..." ani "reszta kodu")
-2. Zachowaj istniejące funkcje
-3. Dodając nową funkcjonalność - zintegruj ją wszędzie
-
-INTEGRACJA (przykład blue_food):
-1. food.py: Dodaj parametr color do klasy Food
-2. main.py: Stwórz instancję blue_food = Food('blue', x, y)
-3. main.py: Wywołaj blue_food.draw() w game loop
-4. main.py: Dodaj kolizję if snake.collides(blue_food): ...
-
-PAMIĘTAJ: Użyj znaczników ### FILE: i ### ENDFILE!
+UWAGA: Jeśli plik ma 200 linii, musisz zwrócić WSZYSTKIE 200 linii (ze zmianami).
 """)
 
-    # USER MESSAGE (wspólny dla obu trybów)
     user_msg = HumanMessage(content=f"""
 TRYB PRACY: {mode}
 
-PLAN ARCHITEKTA:
+PLAN ARCHITEKTA (CO ZROBIĆ):
 {plan}
 
-ZADANIE:
+ZADANIE SZCZEGÓŁOWE:
 {task_desc}
 
-OBECNY KOD:
+AKTUALNY KOD PROJEKTU (KONTEKST):
 {code_context}
 
-Rozpocznij od analizy, potem kod z pełną integracją.
+{'Użyj formatu EDIT/SEARCH/REPLACE dla precyzyjnych zmian.' if use_diff_mode else 'Rozpocznij od analizy zmian, a potem wygeneruj PEŁNE pliki.'}
 """)
     
     # === 4. WYWOŁANIE LLM ===
