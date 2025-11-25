@@ -9,6 +9,17 @@ from graph.workflow import app
 from langchain_core.messages import HumanMessage
 from tools.file_ops import list_files, read_file, get_all_file_paths, write_file
 
+# --- KONFIGURACJA STRONY ---
+st.set_page_config(
+    page_title="CodeFabric | AI Software House",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'About': "CodeFabric - Autonomiczny zespół AI do tworzenia oprogramowania"
+    }
+)
+
 # --- KONFIGURACJA CHATÓW ---
 CHATS_DIR = "./chats"
 os.makedirs(CHATS_DIR, exist_ok=True)
@@ -51,24 +62,20 @@ def list_all_chats() -> list:
                 'updated': state.get('updated', '')
             })
     
-    # Sortuj po dacie (najnowsze pierwsze)
     chats.sort(key=lambda x: x['updated'], reverse=True)
     return chats
 
 def generate_chat_name(first_message: str) -> str:
     """Generuje nazwę chatu na podstawie pierwszego prompta"""
-    # Weź pierwsze 30 znaków, usuń znaki specjalne
     name = first_message[:30].strip()
-    # Usuń wielokrotne spacje
     name = ' '.join(name.split())
     return name if name else "Nowy projekt"
 
 def create_new_chat() -> str:
     """Tworzy nowy chat i zwraca jego ID"""
-    chat_id = str(uuid.uuid4())[:8]  # Krótkie ID
+    chat_id = str(uuid.uuid4())[:8]
     os.makedirs(get_chat_workspace(chat_id), exist_ok=True)
     
-    # Zapisz pusty stan
     save_chat_state(chat_id, {
         'name': 'Nowy projekt',
         'created': datetime.now().isoformat(),
@@ -77,14 +84,6 @@ def create_new_chat() -> str:
     })
     
     return chat_id
-
-# --- KONFIGURACJA STRONY ---
-st.set_page_config(
-    page_title="CodeFabric | AI Software House",
-    page_icon="🗂️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # --- DOSTĘPNE MODELE ---
 AVAILABLE_MODELS = [
@@ -117,7 +116,7 @@ def inject_custom_css():
 
 inject_custom_css()
 
-# === INICJALIZACJA AKTYWNEGO CHATU (MUSI BYĆ NA POCZĄTKU!) ===
+# === INICJALIZACJA AKTYWNEGO CHATU ===
 if "active_chat_id" not in st.session_state:
     existing_chats = list_all_chats()
     if existing_chats:
@@ -125,7 +124,7 @@ if "active_chat_id" not in st.session_state:
     else:
         st.session_state["active_chat_id"] = create_new_chat()
 
-# --- FUNKCJA BACKUP DLA AKTYWNEGO CHATU ---
+# --- FUNKCJA BACKUP ---
 def create_backup():
     """Tworzy backup workspace aktywnego chatu"""
     chat_id = st.session_state.get("active_chat_id")
@@ -148,10 +147,9 @@ with st.sidebar:
     st.markdown("### **CodeFabric**")
     st.divider()
     
-    # === SEKCJA CHATÓW ===
+    # === SEKCJA: PROJEKTY ===
     st.markdown("#### 💬 Projekty")
     
-    # Przycisk nowego chatu
     if st.button("➕ Nowy projekt", use_container_width=True, type="primary"):
         new_chat_id = create_new_chat()
         st.session_state["active_chat_id"] = new_chat_id
@@ -166,61 +164,65 @@ with st.sidebar:
     all_chats = list_all_chats()
     if all_chats:
         st.markdown("**Ostatnie:**")
-        for chat in all_chats[:5]:  # Pokaż 5 ostatnich
+        for chat in all_chats[:5]:
             is_active = chat['id'] == st.session_state["active_chat_id"]
+            display_name = chat['name'][:30] + "..." if len(chat['name']) > 30 else chat['name']
             
-            # Skróć nazwę jeśli za długa
-            display_name = chat['name'][:25] + "..." if len(chat['name']) > 25 else chat['name']
+            button_label = f"{'▶ ' if is_active else '○ '}{display_name}"
             
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                if st.button(
-                    f"{'✓ ' if is_active else '  '}{display_name}",
-                    key=f"chat_{chat['id']}",
-                    use_container_width=True,
-                    disabled=is_active
-                ):
-                    # Zapisz obecny chat
-                    save_chat_state(st.session_state["active_chat_id"], {
-                        'name': chat_state.get('name', 'Nowy projekt') if chat_state else 'Nowy projekt',
-                        'updated': datetime.now().isoformat(),
-                        'messages': st.session_state.get("messages", []),
-                        'graph_state': st.session_state.get("graph_state", {})
-                    })
-                    
-                    # Przełącz na nowy
-                    st.session_state["active_chat_id"] = chat['id']
-                    del st.session_state["current_chat_loaded"]
-                    if "graph_state" in st.session_state:
-                        del st.session_state["graph_state"]
-                    st.rerun()
-            
-            with col2:
-                if st.button("🗑️", key=f"del_{chat['id']}", disabled=is_active):
-                    # Usuń chat
-                    shutil.rmtree(os.path.join(CHATS_DIR, chat['id']))
-                    if is_active and len(all_chats) > 1:
-                        # Przełącz na inny chat
-                        other_chat = [c for c in all_chats if c['id'] != chat['id']][0]
-                        st.session_state["active_chat_id"] = other_chat['id']
-                        del st.session_state["current_chat_loaded"]
-                    st.rerun()
+            if st.button(
+                button_label,
+                key=f"chat_{chat['id']}",
+                use_container_width=True,
+                disabled=is_active,
+                type="primary" if is_active else "secondary"
+            ):
+                chat_state = load_chat_state(st.session_state["active_chat_id"])
+                save_chat_state(st.session_state["active_chat_id"], {
+                    'name': chat_state.get('name', 'Nowy projekt') if chat_state else 'Nowy projekt',
+                    'updated': datetime.now().isoformat(),
+                    'messages': st.session_state.get("messages", []),
+                    'graph_state': st.session_state.get("graph_state", {})
+                })
+                
+                st.session_state["active_chat_id"] = chat['id']
+                st.session_state["current_chat_loaded"] = None
+                if "graph_state" in st.session_state:
+                    del st.session_state["graph_state"]
+                st.rerun()
+        
+        # Delete button
+        st.divider()
+        if st.button("🗑️ Usuń aktywny projekt", use_container_width=True, key="delete_active"):
+            active_id = st.session_state["active_chat_id"]
+            shutil.rmtree(os.path.join(CHATS_DIR, active_id))
+            remaining = [c for c in all_chats if c['id'] != active_id]
+            if remaining:
+                st.session_state["active_chat_id"] = remaining[0]['id']
+            else:
+                new_id = create_new_chat()
+                st.session_state["active_chat_id"] = new_id
+            st.session_state["current_chat_loaded"] = None
+            if "graph_state" in st.session_state:
+                del st.session_state["graph_state"]
+            st.rerun()
     else:
         st.info("Brak projektów", icon="📝")
     
     st.divider()
     
-    st.markdown("#### 🧠 Wybór Mózgów")
-    chat_model = st.selectbox("🗣️ Architekt/Manager", AVAILABLE_MODELS, index=1)  # bielik2.6:11b
-    coder_model = st.selectbox("👨‍💻 Programista", AVAILABLE_MODELS, index=0)  # qwen3-coder:30b
+    # === SEKCJA: MODELE ===
+    st.markdown("#### 🧠 Wybór Modeli")
+    chat_model = st.selectbox("Architekt/Manager", AVAILABLE_MODELS, index=1, help="Model do planowania")
+    coder_model = st.selectbox("Programista", AVAILABLE_MODELS, index=0, help="Model do kodu")
     st.divider()
 
+    # === SEKCJA: PLIKI ===
     st.markdown("#### 📂 Pliki")
     col1, col2 = st.columns(2)
     if col1.button("🔄 Odśwież", use_container_width=True):
         st.rerun()
     
-    # NOWOŚĆ: Rollback dla aktywnego chatu
     if col2.button("⏮️ Rollback", use_container_width=True):
         chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
         backups_dir = os.path.join(CHATS_DIR, st.session_state["active_chat_id"], "backups")
@@ -237,12 +239,10 @@ with st.sidebar:
         else:
             st.warning("Brak backupów")
 
-    # Lista plików aktywnego chatu
+    # Lista plików
     chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
-    
-    # Tymczasowo zmień working directory dla file_ops
-    original_workspace = "./workspace"
     import tools.file_ops as file_ops_module
+    original_workspace = file_ops_module.WORKSPACE_DIR
     file_ops_module.WORKSPACE_DIR = chat_workspace
     
     files_str = list_files()
@@ -256,17 +256,17 @@ with st.sidebar:
     else:
         st.info("Pusto.", icon="ℹ️")
     
-    # Przywróć oryginalny workspace
     file_ops_module.WORKSPACE_DIR = original_workspace
 
     st.divider()
     
-    # Informacja o backupach aktywnego chatu
+    # Backup info
     backups_dir = os.path.join(CHATS_DIR, st.session_state.get("active_chat_id", ""), "backups")
     if os.path.exists(backups_dir):
         backup_count = len([d for d in os.listdir(backups_dir) if d.startswith("backup_")])
         st.caption(f"💾 Backupy: {backup_count}")
     
+    # ZIP download
     if st.button("📦 Pobierz ZIP", use_container_width=True):
         chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
         active_chat_state = load_chat_state(st.session_state["active_chat_id"])
@@ -281,17 +281,15 @@ with st.sidebar:
             st.warning("Brak plików do spakowania")
 
 # --- GŁÓWNY CZAT ---
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.title("CodeFabric AI")
-    st.markdown("Twój autonomiczny zespół deweloperski.")
+st.title("CodeFabric AI")
+st.markdown("Twój autonomiczny zespół deweloperski.")
+st.divider()
 
-# Wczytaj stan aktywnego chatu (inicjalizacja była na górze)
+# Wczytaj stan aktywnego chatu
 active_chat_id = st.session_state["active_chat_id"]
 chat_state = load_chat_state(active_chat_id)
 
 if "messages" not in st.session_state or st.session_state.get("current_chat_loaded") != active_chat_id:
-    # Wczytaj wiadomości z pliku
     if chat_state and 'messages' in chat_state:
         st.session_state["messages"] = chat_state['messages']
     else:
@@ -301,31 +299,30 @@ if "messages" not in st.session_state or st.session_state.get("current_chat_load
     st.session_state["pipeline_active"] = False
 
 for msg in st.session_state["messages"]:
-    avatar = "🧑‍💻" if msg["role"] == "user" else "🕵️‍♂️"
+    avatar = "🧑‍💻" if msg["role"] == "user" else "🤖"
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
-user_input = st.chat_input("Opis projektu...")
+user_input = st.chat_input("Opisz projekt który chcesz stworzyć...")
 
 if user_input:
     st.session_state["messages"].append({"role": "user", "content": user_input})
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(user_input)
     
-    # Backup przed każdą nową iteracją
+    # Backup
     backup_path = create_backup()
     if backup_path:
         st.toast(f"💾 Backup utworzony", icon="✅")
     
-    # Generuj nazwę chatu z pierwszego prompta
+    # Generuj nazwę z pierwszego prompta
     active_chat_state = load_chat_state(st.session_state["active_chat_id"])
     if active_chat_state and active_chat_state.get('name') == 'Nowy projekt':
-        # To pierwszy prompt - generuj nazwę
         new_name = generate_chat_name(user_input)
         active_chat_state['name'] = new_name
         save_chat_state(st.session_state["active_chat_id"], active_chat_state)
     
-    # Zapisz wiadomości do state
+    # Zapisz wiadomości
     if active_chat_state:
         active_chat_state['messages'] = st.session_state["messages"]
         active_chat_state['updated'] = datetime.now().isoformat()
@@ -340,17 +337,14 @@ if user_input:
 if st.session_state.get("pipeline_active"):
     
     if "graph_state" not in st.session_state:
-        # Pobierz pliki z workspace aktywnego chatu
         chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
         
-        # Tymczasowo zmień workspace dla file_ops
         import tools.file_ops as file_ops_module
         original_ws = file_ops_module.WORKSPACE_DIR
         file_ops_module.WORKSPACE_DIR = chat_workspace
         
         existing_files = get_all_file_paths()
         
-        # Przywróć
         file_ops_module.WORKSPACE_DIR = original_ws
         
         st.session_state["graph_state"] = {
@@ -362,7 +356,7 @@ if st.session_state.get("pipeline_active"):
             "revision_count": 0,
             "next_node": "manager",
             "model_names": {"chat": chat_model, "coder": coder_model},
-            "chat_workspace": chat_workspace  # NOWOŚĆ: Przekaż workspace do agentów
+            "chat_workspace": chat_workspace
         }
 
     status_placeholder = st.empty()
@@ -375,7 +369,7 @@ if st.session_state.get("pipeline_active"):
     feedback = current_state.get("feedback")
     next_node = current_state.get("next_node")
 
-    # --- DECYZJA: CZY URUCHAMIAĆ GRAF? ---
+    # Decyzja: czy uruchamiać graf?
     should_run_graph = True
     
     if plan and not is_approved and not feedback:
@@ -387,7 +381,7 @@ if st.session_state.get("pipeline_active"):
     if feedback and "APPROVE" in str(feedback).upper():
         should_run_graph = False
 
-    # --- URUCHAMIANIE GRAFU ---
+    # Uruchamianie grafu
     if should_run_graph:
         with status_placeholder.container():
             status = st.status("🚀 AI pracuje...", expanded=True)
@@ -433,7 +427,7 @@ if st.session_state.get("pipeline_active"):
                 st.error(f"Błąd: {e}")
                 st.session_state["pipeline_active"] = False
 
-    # --- INTERFEJS ---
+    # Interfejs decyzji
     plan = st.session_state["graph_state"].get("plan")
     is_approved = st.session_state["graph_state"].get("plan_approved")
     next_node = st.session_state["graph_state"].get("next_node")
@@ -442,33 +436,33 @@ if st.session_state.get("pipeline_active"):
     # Scenariusz A: Decyzja o planie
     if plan and not is_approved:
         with action_placeholder.container():
-            st.info("🧠 **Architekt przygotował plan.**")
+            st.info("🧠 **Architekt przygotował plan.**", icon="📋")
             with st.expander("📜 ZOBACZ PLAN", expanded=True):
                 st.markdown(plan)
             
-            c1, c2 = st.columns(2)
-            if c1.button("✅ Zatwierdź i Koduj", type="primary", use_container_width=True, key="btn_approve"):
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if st.button("✅ Zatwierdź i Rozpocznij Kodowanie", type="primary", use_container_width=True, key="btn_approve"):
                 st.session_state["graph_state"]["plan_approved"] = True
                 st.session_state["graph_state"]["feedback"] = None
                 st.session_state["graph_state"]["next_node"] = "manager" 
                 st.rerun()
             
-            with c2:
-                user_feedback = st.text_input("Uwagi:", key="input_feedback")
-                if st.button("❌ Popraw Plan", use_container_width=True, key="btn_reject"):
-                    if user_feedback:
-                        st.session_state["graph_state"]["feedback"] = user_feedback
-                        st.session_state["graph_state"]["plan"] = None
-                        st.session_state["graph_state"]["plan_approved"] = False
-                        st.session_state["graph_state"]["next_node"] = "manager"
-                        st.rerun()
-                    else:
-                        st.warning("Wpisz uwagi.")
+            st.markdown("**Lub podaj uwagi do poprawy:**")
+            user_feedback = st.text_area("Uwagi:", placeholder="Co chcesz zmienić w planie?", key="input_feedback")
+            if st.button("🔄 Popraw Plan", use_container_width=True, key="btn_reject"):
+                if user_feedback:
+                    st.session_state["graph_state"]["feedback"] = user_feedback
+                    st.session_state["graph_state"]["plan"] = None
+                    st.session_state["graph_state"]["plan_approved"] = False
+                    st.session_state["graph_state"]["next_node"] = "manager"
+                    st.rerun()
+                else:
+                    st.warning("Wpisz uwagi do poprawy.")
 
     # Scenariusz B: Sukces
     elif next_node == "end":
         if not last_feedback or "APPROVE" in str(last_feedback).upper():
-            # Sukces - wyłącz pipeline, pozwól pisać dalej
             st.session_state["pipeline_active"] = False
             
             with action_placeholder.container():
@@ -476,14 +470,13 @@ if st.session_state.get("pipeline_active"):
                 
                 important_files = [f for f in get_all_file_paths() if any(f.endswith(ext) for ext in ['.py', '.js', '.html', '.md'])]
                 if important_files:
-                    with st.expander("📁 Wygenerowane pliki", expanded=True):
-                        for f in important_files:
-                            st.markdown(f"- `{f}`")
+                    st.markdown("**📦 Wygenerowane pliki:**")
+                    for f in important_files:
+                        st.markdown(f"- `{f}`")
                 
                 st.info("💬 Możesz teraz dodać kolejne funkcje - po prostu napisz co chcesz zmienić!", icon="✨")
                 
                 if st.button("🆕 Nowy projekt", key="btn_finish", use_container_width=True):
-                    # To samo co przycisk "➕ Nowy projekt" w sidebarze
                     new_chat_id = create_new_chat()
                     st.session_state["active_chat_id"] = new_chat_id
                     st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]

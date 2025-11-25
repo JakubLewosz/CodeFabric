@@ -238,50 +238,40 @@ Teraz przeanalizuj kod i zaplanuj PEŁNĄ integrację z wysoką jakością.
 """)
     else:
         sys_msg = SystemMessage(content="""
-Jesteś Expert Software Engineerem. Twoim celem jest dostarczenie DZIAŁAJĄCEGO, KOMPLETNEGO kodu.
+Jesteś Expert Software Engineerem. Piszesz KOMPLETNY, DZIAŁAJĄCY kod.
 
---- ZASADY EDYCJI PLIKÓW (KRYTYCZNE) ---
-1. Jeśli edytujesz plik, musisz zwrócić jego PEŁNĄ, NOWĄ ZAWARTOŚĆ.
-2. ABSOLUTNY ZAKAZ używania skrótów: `// ... reszta kodu`, `# ... existing code`. TO PSUJE PLIK.
-3. Musisz zachować istniejące funkcjonalności, chyba że plan każe je usunąć.
+FORMAT:
+### FILE: plik.py
+[PEŁNA zawartość]
+### ENDFILE
 
-❗ KRYTYCZNE: PEŁNA INTEGRACJA ❗
-Gdy dodajesz nową funkcjonalność (nowy obiekt, klasę, feature), musisz ją ZINTEGROWAĆ:
+ZASADY:
+1. Zwróć CAŁĄ zawartość pliku (nie skróty)
+2. Zachowaj istniejące funkcje
 
-Przykład zadania: "Dodaj niebieski owoc który daje 2 punkty"
+INTEGRACJA - dodając blue_food:
+1. food.py: Dodaj color parameter
+2. main.py: blue_food = Food('blue', 2)
+3. main.py: blue_food.draw()
+4. main.py: kolizja z blue_food
 
-✅ PEŁNA INTEGRACJA (POPRAWNIE):
-1. food.py: Zaktualizuj klasę Food(color='red', points=1)
-2. main.py inicjalizacja: Dodaj blue_food = Food(color='blue', points=2)
-3. main.py game loop: Dodaj blue_food.draw(screen)
-4. main.py kolizje: Dodaj if snake.collides(blue_food): score += blue_food.points
+Rozpocznij od planu integracji.
+""")
 
-❌ NIEPEŁNA INTEGRACJA (BŁĄD):
-1. Tylko zaktualizować food.py
-2. Nie dodać blue_food do main.py
-3. Nie renderować blue_food
-→ Rezultat: Kod istnieje ale nic nie działa!
+    # USER MESSAGE (wspólny dla obu trybów)
+    user_msg = HumanMessage(content=f"""
+TRYB PRACY: {mode}
 
-ZASADA ZŁOTA: Każda nowa funkcja musi być:
-- Zdefiniowana (np. klasa)
-- Zainicjalizowana (np. blue_food = ...)
-- Użyta (np. draw(), collision check)
-
-⭐ JAKOŚĆ KODU (STANDARDS) ⭐
-
-1. **CZYTELNOŚĆ:**
-   - Nazwy: food_position, not fp
-
-PLAN ARCHITEKTA (CO ZROBIĆ):
+PLAN ARCHITEKTA:
 {plan}
 
-ZADANIE SZCZEGÓŁOWE:
+ZADANIE:
 {task_desc}
 
-AKTUALNY KOD PROJEKTU (KONTEKST):
+OBECNY KOD:
 {code_context}
 
-{'Użyj formatu EDIT/SEARCH/REPLACE dla precyzyjnych zmian.' if use_diff_mode else 'Rozpocznij od analizy zmian, a potem wygeneruj PEŁNE pliki.'}
+Rozpocznij od analizy, potem kod z pełną integracją.
 """)
     
     # === 4. WYWOŁANIE LLM ===
