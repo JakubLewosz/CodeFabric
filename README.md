@@ -2,7 +2,7 @@
 
 Prototyp aplikacji wspierającej tworzenie projektów programistycznych z pomocą generatywnej AI.
 
-Projekt jest nadal rozwijany we współpracy. Powstał jako eksperyment z automatyzacją pracy programistycznej: użytkownik opisuje pomysł na aplikację, a system pomaga przejść od wymagań do planu, struktury plików i wygenerowanego kodu.
+Projekt był rozwijany we współpracy i jest obecnie zamkniętym prototypem edukacyjno-portfolio. Powstał jako eksperyment z automatyzacją pracy programistycznej: użytkownik opisuje pomysł na aplikację, a system pomaga przejść od wymagań do planu, struktury plików i wygenerowanego kodu.
 
 ## Co Pokazuje Projekt
 
@@ -87,11 +87,11 @@ Modele dostępne w interfejsie są skonfigurowane w `app.py`.
 
 ## Status Projektu
 
-To rozwijany prototyp edukacyjno-portfolio, a nie gotowy produkt komercyjny. Najważniejszym celem projektu jest pokazanie podejścia do automatyzacji z pomocą AI, pracy z agentami oraz budowania narzędzi wspierających programistę.
+To zamknięty prototyp edukacyjno-portfolio, a nie gotowy produkt komercyjny. Najważniejszym celem projektu jest pokazanie podejścia do automatyzacji z pomocą AI, pracy z agentami oraz budowania narzędzi wspierających programistę.
 
 ## Współpraca
 
-Projekt jest współtworzony. README opisuje publiczny stan repozytorium i funkcje możliwe do sprawdzenia w kodzie.
+Projekt był współtworzony. README opisuje publiczny stan repozytorium i funkcje możliwe do sprawdzenia w kodzie.
 
 ## Ograniczenia
 
