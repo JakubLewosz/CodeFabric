@@ -2,7 +2,7 @@
 
 Prototyp aplikacji wspierającej tworzenie projektów programistycznych z pomocą generatywnej AI.
 
-Projekt powstał jako eksperyment z automatyzacją pracy programistycznej: użytkownik opisuje pomysł na aplikację, a system pomaga przejść od wymagań do planu, struktury plików i wygenerowanego kodu.
+Projekt jest nadal rozwijany we współpracy. Powstał jako eksperyment z automatyzacją pracy programistycznej: użytkownik opisuje pomysł na aplikację, a system pomaga przejść od wymagań do planu, struktury plików i wygenerowanego kodu.
 
 ## Co Pokazuje Projekt
 
@@ -13,6 +13,10 @@ Projekt powstał jako eksperyment z automatyzacją pracy programistycznej: użyt
 - zapisywanie wygenerowanych plików w osobnym workspace,
 - mechanizm backupu i rollbacku dla zmian w projekcie,
 - podstawy pracy z kontekstem, plikami i oceną wygenerowanego kodu.
+
+## Podgląd
+
+![Interfejs CodeFabric](./docs/images/codefabric-ui.jpg)
 
 ## Jak Działa
 
@@ -83,7 +87,11 @@ Modele dostępne w interfejsie są skonfigurowane w `app.py`.
 
 ## Status Projektu
 
-To prototyp edukacyjno-portfolio, a nie gotowy produkt komercyjny. Najważniejszym celem projektu jest pokazanie podejścia do automatyzacji z pomocą AI, pracy z agentami oraz budowania narzędzi wspierających programistę.
+To rozwijany prototyp edukacyjno-portfolio, a nie gotowy produkt komercyjny. Najważniejszym celem projektu jest pokazanie podejścia do automatyzacji z pomocą AI, pracy z agentami oraz budowania narzędzi wspierających programistę.
+
+## Współpraca
+
+Projekt jest współtworzony. README opisuje publiczny stan repozytorium i funkcje możliwe do sprawdzenia w kodzie.
 
 ## Ograniczenia
 

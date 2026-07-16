@@ -19,6 +19,7 @@ Thumbs.db
 # Ale chcemy zachować sam folder, więc zostawiamy .gitkeep
 workspace/*
 !workspace/.gitkeep
+chats/
 
 # --- IDE I EDYTORY ---
 .vscode/

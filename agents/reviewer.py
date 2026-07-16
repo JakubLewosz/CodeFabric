@@ -1,353 +1,93 @@
-import re
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
 from state import AgentState
-from tools.file_ops import write_file, read_file, get_all_file_paths
+from tools.file_ops import get_all_file_paths, read_file, write_file
 from tools.llm_factory import get_llm
 
-def smart_truncate(content: str, max_length: int = 6000) -> str:
-    """
-    Inteligentne obcinanie kodu - zachowuje początek (importy) i koniec (main logic).
-    """
+
+def _truncate(content: str, max_length: int = 6000) -> str:
     if len(content) <= max_length:
         return content
-    
-    head_size = max_length // 2
-    tail_size = max_length // 2
+
+    half = max_length // 2
     omitted = len(content) - max_length
-    
     return (
-        content[:head_size] + 
-        f"\n\n# ... [POMINIĘTO {omitted} ZNAKÓW] ...\n\n" + 
-        content[-tail_size:]
+        content[:half]
+        + f"\n\n# ... [POMINIĘTO {omitted} ZNAKÓW] ...\n\n"
+        + content[-half:]
     )
 
-def parse_diff_edits(ai_response: str) -> list:
-    """
-    Parsuje edycje w formacie SEARCH/REPLACE (tryb diff).
-    Zwraca listę tupli: (filepath, search_block, replace_block)
-    """
-    pattern = r"###\s*EDIT:\s*([^\n]+)\nSEARCH:\n(.*?)\nREPLACE:\n(.*?)\n###\s*END_EDIT"
-    matches = re.findall(pattern, ai_response, re.DOTALL | re.IGNORECASE)
-    return [(f.strip(), s.strip(), r.strip()) for f, s, r in matches]
 
-def apply_diff_edits(edits: list) -> list:
-    """
-    Aplikuje edycje SEARCH/REPLACE do istniejących plików.
-    """
-    modified_files = []
-    for filepath, search_block, replace_block in edits:
-        current_content = read_file(filepath)
-        
-        if not current_content:
-            print(f"⚠️ Plik {filepath} nie istnieje, pomijam EDIT.")
+def _build_review_context(files: list[str]) -> str:
+    context_parts = []
+    for path in files:
+        if not path.endswith((".py", ".js", ".html", ".css", ".json", ".md", ".txt", ".jsx", ".tsx")):
             continue
-        
-        # Normalizacja whitespace (usuń różnice w spacjach/tabulatorach)
-        search_normalized = " ".join(search_block.split())
-        content_normalized = " ".join(current_content.split())
-        
-        # Dokładne dopasowanie
-        if search_block in current_content:
-            new_content = current_content.replace(search_block, replace_block, 1)
-            write_file(filepath, new_content)
-            print(f"✏️ Zaktualizowano (DIFF): {filepath}")
-            modified_files.append(filepath)
-        
-        # Fuzzy matching (jeśli różnice w whitespace)
-        elif search_normalized in content_normalized:
-            print(f"⚠️ Znaleziono podobny blok w {filepath} (różnice w spacjach)")
-            # Znajdź oryginalny fragment
-            lines = current_content.split('\n')
-            search_lines = search_block.split('\n')
-            
-            # Prosta heurystyka - znajdź pierwszą linię
-            first_line = search_lines[0].strip()
-            for i, line in enumerate(lines):
-                if first_line in line:
-                    # Zastąp od tej linii
-                    lines_count = len(search_lines)
-                    new_lines = lines[:i] + replace_block.split('\n') + lines[i+lines_count:]
-                    new_content = '\n'.join(new_lines)
-                    write_file(filepath, new_content)
-                    print(f"✏️ Zaktualizowano (FUZZY): {filepath}")
-                    modified_files.append(filepath)
-                    break
-        
-        # Nie znaleziono
-        else:
-            print(f"❌ NIE ZNALEZIONO bloku SEARCH w {filepath}")
-            print(f"   Szukano: {search_block[:100]}...")
-            
-            # Diagnostyka
-            debug_content = f"""
-BŁĄD DIFF-EDITING
-=================
 
-PLIK: {filepath}
+        content = read_file(path)
+        if content:
+            context_parts.append(
+                f"=== PLIK: {path} ===\n{_truncate(content)}\n===================="
+            )
 
-SZUKANO (pierwsze 500 znaków):
-{search_block[:500]}
+    return "\n\n".join(context_parts) if context_parts else "Brak plików do recenzji."
 
-ZAWARTOŚĆ PLIKU (pierwsze 1000 znaków):
-{current_content[:1000]}
 
-SUGESTIA:
-LLM prawdopodobnie nie skopiował DOKŁADNIE kodu z pliku.
-Coder powinien użyć trybu FULL REWRITE dla tego pliku.
-"""
-            write_file(f"debug_diff_fail_{filepath.replace('/', '_')}.txt", debug_content)
-            print(f"   Zapisano diagnostykę: debug_diff_fail_{filepath.replace('/', '_')}.txt")
-    
-    return modified_files
-
-def parse_and_save_files(ai_response: str):
-    """Parsuje odpowiedź AI i zapisuje pliki (tryb full rewrite)."""
-    if not ai_response: 
-        return []
-
-    # Próba 1: Standardowy format ### FILE: ... ### ENDFILE
-    pattern1 = r"###\s*FILE:\s*([^\n]+)\n(.*?)\n###\s*ENDFILE"
-    matches = re.findall(pattern1, ai_response, re.DOTALL | re.IGNORECASE)
-    
-    # Próba 2: Bardziej elastyczny format (bez ###)
-    if not matches:
-        pattern2 = r"FILE:\s*([^\n]+)\n(.*?)(?=\nFILE:|\nENDFILE|$)"
-        matches = re.findall(pattern2, ai_response, re.DOTALL | re.IGNORECASE)
-    
-    # Próba 3: Format z blokami kodu ```python
-    if not matches:
-        pattern3 = r"```([a-z]+)\s*#\s*([^\n]+)\n(.*?)```"
-        matches = re.findall(pattern3, ai_response, re.DOTALL)
-        # Przetw. (lang, filename, content) -> (filename, content)
-        matches = [(f.strip(), c) for _, f, c in matches if f.strip()]
-    
-    created_files = []
-    
-    if not matches and len(ai_response.strip()) > 50:
-        if any(keyword in ai_response for keyword in ["def ", "class ", "import ", "function ", "const "]):
-            print("⚠️ AI nie użyło znaczników FILE:, zapisuję jako raw_code.txt")
-            write_file("raw_code.txt", ai_response)
-            return ["raw_code.txt"]
-        return []
-
-    for filename, content in matches:
-        filename = filename.strip()
-        content = content.strip()
-        
-        # Usuń markdown wrappery
-        content = re.sub(r"^```[a-zA-Z]*\n", "", content)
-        content = re.sub(r"\n```$", "", content)
-        
-        if len(content) < 10:
-            print(f"⚠️ Plik {filename} jest podejrzanie krótki ({len(content)} znaków), pomijam.")
-            continue
-        
-        write_file(filename, content)
-        print(f"→ Zaktualizowano plik: {filename}")
-        created_files.append(filename)
-        
-    return created_files
-
-def coder_node(state: AgentState):
-    plan = state.get("plan", "Brak planu.")
-    feedback = state.get("feedback", "")
-    current_revisions = state.get("revision_count", 0)
-    chat_workspace = state.get("chat_workspace")  # NOWOŚĆ
-    
-    # Ustaw workspace jeśli podany
+def reviewer_node(state: AgentState):
+    chat_workspace = state.get("chat_workspace")
     if chat_workspace:
         import tools.file_ops as file_ops_module
+
         file_ops_module.WORKSPACE_DIR = chat_workspace
-    
-    model_name = state.get("model_names", {}).get("coder", "qwen3-coder:30b")
-    llm = get_llm(model_name, temperature=0.0, num_ctx=32768) 
 
-    # === 1. WCZYTANIE KONTEKSTU (PAMIĘĆ) ===
-    existing_files = get_all_file_paths()
-    code_context = ""
-    
-    if existing_files:
-        print(f"--- PROGRAMISTA: ANALIZA {len(existing_files)} PLIKÓW ---")
-        total_chars = 0
-        
-        for f in existing_files:
-            if f.endswith(('.py', '.js', '.html', '.css', '.cs', '.json', '.md', '.txt', '.jsx', '.tsx')):
-                content = read_file(f)
-                truncated = smart_truncate(content, max_length=8000)
-                code_context += f"\n=== PLIK ISTNIEJĄCY: {f} ===\n{truncated}\n============================\n"
-                total_chars += len(truncated)
-        
-        print(f"→ Załadowano {total_chars} znaków kontekstu.")
-    else:
-        code_context = "BRAK PLIKÓW (Nowy projekt)."
+    files = state.get("current_files") or get_all_file_paths()
+    plan = state.get("plan") or "Brak planu."
+    model_name = state.get("model_names", {}).get("reviewer") or state.get(
+        "model_names", {}
+    ).get("chat", "bielik2.6:11b")
 
-    # === 2. OKREŚLENIE TRYBU PRACY ===
-    use_diff_mode = False
-    total_lines = 0
-    
-    # Policz linie tylko dla plików kodowych
-    if existing_files:
-        for f in existing_files:
-            if f.endswith(('.py', '.js', '.html', '.css', '.jsx', '.tsx')):
-                content = read_file(f)
-                total_lines += content.count('\n')
-    
-    if feedback and "REJECT" in str(feedback).upper():
-        mode = "TRYB NAPRAWY (DEBUGGING)"
-        task_desc = f"Tester zgłosił błędy:\n{feedback}\n\nTwoim zadaniem jest je naprawić."
-        current_revisions += 1
-        # DIFF tylko dla DUŻYCH projektów (>10 plików LUB >300 linii)
-        use_diff_mode = len(existing_files) > 10 or total_lines > 300
-        
-    elif existing_files:
-        mode = "TRYB ROZWOJU (REFACTORING)"
-        task_desc = "Zaimplementuj zmiany opisane w planie, modyfikując istniejący kod."
-        # DIFF dla średnich/dużych projektów
-        use_diff_mode = len(existing_files) > 10 or total_lines > 300
-        
-    else:
-        mode = "TRYB TWORZENIA (GREENFIELD)"
-        task_desc = "Napisz kod od zera na podstawie planu."
+    review_context = _build_review_context(files)
+    llm = get_llm(model_name, temperature=0.0, num_ctx=16384)
 
-    print(f"--- PROGRAMISTA ({model_name}): {mode} ---")
-    if use_diff_mode:
-        print(f"→ Używam DIFF editing ({len(existing_files)} plików, {total_lines} linii)")
-    else:
-        print(f"→ Używam FULL REWRITE ({len(existing_files)} plików, {total_lines} linii - za mały projekt dla DIFF)")
+    system_message = SystemMessage(
+        content="""
+Jesteś recenzentem kodu w projekcie generowanym przez AI.
 
-    # === 3. PRZYGOTOWANIE PROMPTU ===
-    
-    if use_diff_mode:
-        sys_msg = SystemMessage(content="""
-Jesteś Expert Software Engineerem specjalizującym się w chirurgicznych edycjach kodu.
+Odpowiedz w jednym z formatów:
 
---- TRYB PRACY: DIFF EDITING ---
-Zamiast przepisywać całe pliki, użyj formatu SEARCH/REPLACE:
+APPROVE: krótki opis, dlaczego wynik można zaakceptować
+REJECT: konkretna lista problemów do poprawy
 
-### EDIT: ścieżka/plik.ext
-SEARCH:
-[DOKŁADNY fragment kodu do znalezienia - MUSISZ SKOPIOWAĆ GO 1:1 Z ISTNIEJĄCEGO PLIKU]
-REPLACE:
-[Nowa wersja tego fragmentu]
-### END_EDIT
-
-ZASADY KRYTYCZNE (PRZECZYTAJ 3 RAZY):
-1. Blok SEARCH musi być IDENTYCZNY z fragmentem w pliku (co do znaku).
-2. Otwórz plik mentalnie, SKOPIUJ dokładny fragment (ze spacjami, wcięciami).
-3. Jeśli edytujesz funkcję - SKOPIUJ JĄ CAŁĄ w SEARCH (od "def" do końca).
-4. NIE WYMYŚLAJ kodu w SEARCH - KOPIUJ CO WIDZISZ.
-5. NIE SKRACAJ - jeśli funkcja ma 10 linii, SEARCH musi mieć 10 linii.
-
-❗ KRYTYCZNE: INTEGRACJA ❗
-Jeśli dodajesz nową funkcjonalność (np. nowy obiekt, nową klasę):
-- Musisz zaktualizować WSZYSTKIE miejsca które jej używają
-- Przykład: Dodajesz blue_food? Musisz:
-  1. Dodać blue_food do food.py
-  2. Utworzyć instancję w main.py (np. blue_food = Food(color='blue'))
-  3. Dodać renderowanie w game loop (blue_food.draw())
-  4. Dodać kolizje (if snake.collides(blue_food): ...)
-
-Nie zapomnij o żadnym kroku integracji!
-
-Teraz przeanalizuj kod i zaplanuj PEŁNĄ integrację z wysoką jakością.
-""")
-    else:
-        sys_msg = SystemMessage(content="""
-Jesteś Expert Software Engineerem. Piszesz KOMPLETNY, DZIAŁAJĄCY kod.
-
-⚠️ ABSOLUTNIE KRYTYCZNE - FORMAT ODPOWIEDZI ⚠️
-
-MUSISZ użyć DOKŁADNIE tego formatu (skopiuj znaczniki):
-
-### FILE: nazwa_pliku.py
-[cały kod tutaj]
-### ENDFILE
-
-### FILE: inny_plik.py
-[cały kod tutaj]
-### ENDFILE
-
-❌ BEZ TEGO FORMATU KOD NIE ZOSTANIE ZAPISANY ❌
-✅ KAŻDY PLIK MUSI MIEĆ ### FILE: i ### ENDFILE
-
-ZASADY:
-1. Zwróć CAŁĄ zawartość pliku (nie używaj "..." ani "reszta kodu")
-2. Zachowaj istniejące funkcje
-3. Dodając nową funkcjonalność - zintegruj ją wszędzie
-
-INTEGRACJA (przykład blue_food):
-1. food.py: Dodaj parametr color do klasy Food
-2. main.py: Stwórz instancję blue_food = Food('blue', x, y)
-3. main.py: Wywołaj blue_food.draw() w game loop
-4. main.py: Dodaj kolizję if snake.collides(blue_food): ...
-
-PAMIĘTAJ: Użyj znaczników ### FILE: i ### ENDFILE!
-""")
-
-    # USER MESSAGE (wspólny dla obu trybów)
-    user_msg = HumanMessage(content=f"""
-TRYB PRACY: {mode}
-
-PLAN ARCHITEKTA:
+Oceniaj praktycznie: czy pliki istnieją, czy odpowiadają planowi, czy nie ma oczywistych braków integracji.
+Nie wymagaj perfekcji produkcyjnej od prototypu, ale odrzuć wynik, jeśli brakuje kluczowych elementów.
+"""
+    )
+    user_message = HumanMessage(
+        content=f"""
+PLAN:
 {plan}
 
-ZADANIE:
-{task_desc}
+PLIKI DO RECENZJI:
+{review_context}
+"""
+    )
 
-OBECNY KOD:
-{code_context}
-
-Rozpocznij od analizy, potem kod z pełną integracją.
-""")
-    
-    # === 4. WYWOŁANIE LLM ===
-    full_response = ""
     try:
-        print("--- WYSYŁANIE DO AI (To może chwilę potrwać)... ---")
-        response_obj = llm.invoke([sys_msg, user_msg])
-        full_response = response_obj.content
-        print(f"→ Otrzymano {len(full_response)} znaków.")
-        
-    except Exception as e:
-        err = f"BŁĄD LLM: {e}"
-        print(err)
-        write_file("error_log.txt", err)
-        return {
-            "current_files": existing_files,
-            "messages": [AIMessage(content=f"Błąd: {e}")],
-            "revision_count": current_revisions,
-            "feedback": None
-        }
+        response = llm.invoke([system_message, user_message])
+        review = response.content.strip()
+    except Exception as exc:
+        review = (
+            "APPROVE: Nie udało się wykonać recenzji LLM, ale pliki zostały "
+            f"wygenerowane. Błąd recenzenta: {exc}"
+        )
 
-    # === 5. PARSOWANIE I ZAPIS ===
-    saved_files = []
-    
-    if use_diff_mode:
-        edits = parse_diff_edits(full_response)
-        if edits:
-            print(f"→ Znaleziono {len(edits)} edycji DIFF.")
-            saved_files = apply_diff_edits(edits)
-            
-            # NOWOŚĆ: Jeśli diff nie zadziałał dla żadnego pliku -> fallback na FILE
-            if not saved_files:
-                print("⚠️ Wszystkie edycje DIFF FAILED. Próbuję FULL REWRITE...")
-                saved_files = parse_and_save_files(full_response)
-        else:
-            print("⚠️ Brak edycji DIFF, próbuję trybu FILE...")
-            saved_files = parse_and_save_files(full_response)
-    else:
-        saved_files = parse_and_save_files(full_response)
-    
-    if not saved_files and existing_files:
-        print("⚠️ AI nie zwróciło zmian, zachowuję poprzednie pliki.")
-        saved_files = existing_files
-    elif not saved_files:
-        write_file("error_report.txt", f"Brak kodu. Odpowiedź AI:\n{full_response[:1000]}")
-        saved_files.append("error_report.txt")
+    if not review.upper().startswith(("APPROVE", "REJECT")):
+        review = "REJECT: Recenzent nie zwrócił jednoznacznej decyzji.\n\n" + review
+
+    write_file("review_report.md", review)
 
     return {
-        "current_files": saved_files,
-        "messages": [AIMessage(content=f"Zaktualizowano pliki: {saved_files}")],
-        "revision_count": current_revisions,
-        "feedback": None
+        "feedback": review,
+        "messages": [AIMessage(content=f"Recenzja: {review}")],
+        "current_files": files,
     }
