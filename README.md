@@ -1,101 +1,176 @@
 # CodeFabric
 
-Prototyp aplikacji wspierającej tworzenie projektów programistycznych z pomocą generatywnej AI.
+[![CI](https://github.com/JakubLewosz/CodeFabric/actions/workflows/ci.yml/badge.svg)](https://github.com/JakubLewosz/CodeFabric/actions/workflows/ci.yml)
 
-Projekt był rozwijany we współpracy i jest obecnie zamkniętym prototypem edukacyjno-portfolio. Powstał jako eksperyment z automatyzacją pracy programistycznej: użytkownik opisuje pomysł na aplikację, a system pomaga przejść od wymagań do planu, struktury plików i wygenerowanego kodu.
+CodeFabric to edukacyjny prototyp aplikacji, która prowadzi opis pomysłu przez
+planowanie, generowanie kodu i automatyczny przegląd. Interfejs powstał w
+Streamlit, przepływ ról koordynuje LangGraph, a modele działają lokalnie lub
+na prywatnym serwerze przez API Ollama.
 
-## Co Pokazuje Projekt
-
-- pracę z aplikacją webową w Streamlit,
-- podział procesu na role: manager, planner, coder i reviewer,
-- wykorzystanie LangGraph do prowadzenia przepływu między agentami,
-- integrację z lokalnymi modelami przez Ollama i LangChain,
-- zapisywanie wygenerowanych plików w osobnym workspace,
-- mechanizm backupu i rollbacku dla zmian w projekcie,
-- podstawy pracy z kontekstem, plikami i oceną wygenerowanego kodu.
-
-## Podgląd
+> Projekt ma charakter portfolio i demonstratora technologii. Kod wygenerowany
+> przez model zawsze wymaga weryfikacji przed użyciem produkcyjnym.
 
 ![Interfejs CodeFabric](./docs/images/codefabric-ui.jpg)
 
-## Jak Działa
+## Najważniejsze możliwości
+
+- osobne role managera, planisty, programisty i recenzenta,
+- akceptacja planu przez użytkownika przed rozpoczęciem generowania,
+- iteracyjna pętla poprawek po recenzji,
+- osobny workspace i historia rozmowy dla każdego projektu,
+- podgląd plików, kopie zapasowe, rollback i eksport ZIP,
+- konfiguracja lokalnego lub zdalnego serwera Ollama,
+- testy smoke niewymagające uruchomionego modelu.
+
+## Architektura
 
 ```mermaid
 flowchart LR
-    A["Opis projektu"] --> B["Manager"]
-    B --> C["Planner"]
-    C --> D["Coder"]
-    D --> E["Reviewer"]
-    E --> B
-    D --> F["Workspace"]
-    F --> G["Backup / rollback"]
+    U["Opis i akceptacja użytkownika"] --> M["Manager"]
+    M --> P["Planner"]
+    P --> M
+    M --> C["Coder"]
+    C --> R["Reviewer"]
+    R --> M
+    C --> W["Workspace projektu"]
+    W --> B["Backup / rollback / ZIP"]
 ```
 
-## Główne Elementy
+| Element | Odpowiedzialność |
+| --- | --- |
+| `app.py` | interfejs Streamlit, sesje projektów i obsługa plików |
+| `graph/workflow.py` | definicja grafu i przejść między rolami |
+| `agents/` | planowanie, generowanie i recenzja kodu |
+| `tools/llm_factory.py` | wspólna konfiguracja klienta Ollama |
+| `tools/file_ops.py` | bezpieczne operacje na workspace |
+| `chats/` | lokalne, ignorowane przez Git dane projektów i backupy |
 
-- `app.py` - interfejs użytkownika w Streamlit.
-- `graph/workflow.py` - przepływ agentów zbudowany w LangGraph.
-- `agents/manager.py` - decyduje o następnym kroku procesu.
-- `agents/planner.py` - przygotowuje plan realizacji.
-- `agents/coder.py` - generuje lub modyfikuje pliki.
-- `agents/reviewer.py` - sprawdza wynik i sugeruje poprawki.
-- `tools/file_ops.py` - operacje na plikach, workspace i backupach.
-- `tools/llm_factory.py` - konfiguracja lokalnych modeli LLM.
+## Wymagania
 
-## Technologie
+- Python 3.10 lub nowszy (CI sprawdza 3.10 i 3.12 na Ubuntu oraz 3.12 na Windows),
+- działająca instancja [Ollama](https://ollama.com/) dostępna z komputera,
+- co najmniej jeden model zgodny z wyborem w panelu aplikacji.
 
-- Python
-- Streamlit
-- LangChain
-- LangGraph
-- Ollama
-- ChromaDB
-- Pydantic
-- python-dotenv
+Dla dużych modeli potrzebna jest odpowiednia ilość RAM/VRAM. Można
+zacząć od modelu już dostępnego w lokalnej instancji Ollama i wybrać go w
+panelu bocznym.
 
-## Uruchomienie Lokalnie
+## Szybki start
 
-Projekt wymaga lokalnie dostępnego środowiska Python oraz skonfigurowanego Ollama.
+CodeFabric nie wymaga serwera w chmurze. Ollama działa jako lokalny proces na
+Twoim komputerze, domyślnie pod adresem `http://localhost:11434`.
+
+### 1. Uruchom lokalny model
+
+Zainstaluj [Ollamę](https://ollama.com/download), uruchom aplikację, a następnie
+pobierz domyślny model:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-streamlit run app.py
+ollama pull qwen2.5-coder:7b
 ```
 
-Na Windows:
+Na macOS można również wykonać całą instalację przez Homebrew:
+
+```bash
+brew install ollama
+brew services start ollama
+ollama pull qwen2.5-coder:7b
+```
+
+Model jest pobierany jednorazowo i później działa lokalnie. Możesz użyć innego
+modelu zainstalowanego w Ollamie i wybrać go w panelu bocznym CodeFabric.
+
+### 2. Uruchom CodeFabric
+
+#### macOS i Linux
+
+```bash
+git clone https://github.com/JakubLewosz/CodeFabric.git
+cd CodeFabric
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+cp .env.example .env
+python -m streamlit run app.py
+```
+
+#### Windows (PowerShell)
 
 ```powershell
-python -m venv .venv
+git clone https://github.com/JakubLewosz/CodeFabric.git
+cd CodeFabric
+py -3 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-streamlit run app.py
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m streamlit run app.py
 ```
+
+Alternatywnie na Windows można uruchomić `run.bat`; skrypt sprawdzi wersję
+Pythona, utworzy `.venv`, zainstaluje zależności i wystartuje aplikację.
+Po uruchomieniu otwórz `http://localhost:8501` w przeglądarce.
 
 ## Konfiguracja
 
-Opcjonalne zmienne środowiskowe można ustawić w pliku `.env`:
+Ustawienia są odczytywane z `.env`. Plik `.env.example` zawiera bezpieczne
+wartości początkowe:
 
-```env
+```dotenv
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_TOKEN=
-VERIFY_SSL=False
+VERIFY_SSL=true
+CODEFABRIC_DATA_DIR=./chats
+CODEFABRIC_MODELS=qwen2.5-coder:7b
+MODEL_CODER=qwen2.5-coder:7b
+OLLAMA_TIMEOUT=120
 ```
 
-Modele dostępne w interfejsie są skonfigurowane w `app.py`.
+- `OLLAMA_TOKEN` jest opcjonalny i nie powinien trafić do repozytorium.
+- `VERIFY_SSL=false` jest przeznaczone wyłącznie dla zaufanych serwerów z
+  certyfikatem self-signed.
+- `CODEFABRIC_DATA_DIR` wskazuje lokalny katalog rozmów, workspace'ów i
+  backupów; domyślne `./chats` jest ignorowane przez Git. Dla innej ścieżki
+  wewnątrz repozytorium dodaj ją do `.gitignore` albo wybierz katalog poza
+  repozytorium. `CODEFABRIC_MODELS` jest listą zapasową, gdy serwer nie zwróci
+  listy modeli.
+- `OLLAMA_TIMEOUT` obowiązuje agentów i narzędzie diagnostyczne.
+- `MODEL_CODER` dotyczy wyłącznie diagnostyki; modele aplikacji wykrywane są
+  automatycznie i wybierane w interfejsie.
 
-## Status Projektu
+Połączenie z Ollamą można sprawdzić niezależnie od Streamlit:
 
-To zamknięty prototyp edukacyjno-portfolio, a nie gotowy produkt komercyjny. Najważniejszym celem projektu jest pokazanie podejścia do automatyzacji z pomocą AI, pracy z agentami oraz budowania narzędzi wspierających programistę.
+```bash
+python debug_raw.py
+```
 
-## Współpraca
+To polecenie wykonuje prawdziwe zapytanie do modelu. Zwykłe testy projektu nie
+łączą się z Ollamą.
 
-Projekt był współtworzony. README opisuje publiczny stan repozytorium i funkcje możliwe do sprawdzenia w kodzie.
+## Testy i jakość
 
-## Ograniczenia
+```bash
+python -m pip install -r requirements-dev.txt
+bash scripts/check.sh
+```
 
-- aplikacja wymaga lokalnej konfiguracji modeli,
-- jakość wyniku zależy od wybranego modelu i opisu użytkownika,
-- wygenerowany kod powinien zostać sprawdzony przez człowieka,
-- projekt nie powinien być traktowany jako zamiennik normalnego procesu review i testowania.
+Skrypt wykonuje kompilację wszystkich modułów, kontrolę formatowania, lint oraz
+testy grafu, operacji plikowych i interfejsu. Te same kontrole uruchamia GitHub
+Actions dla Pythona 3.10 i 3.12 na Ubuntu oraz 3.12 na Windows.
+
+## Dane i bezpieczeństwo
+
+- `.env`, rozmowy, backupy i wygenerowane pliki są ignorowane przez Git,
+- token jest przekazywany wyłącznie jako nagłówek do skonfigurowanego serwera,
+- przed otwarciem wygenerowanego projektu należy przejrzeć jego kod i
+  zależności,
+- CodeFabric nie uruchamia wygenerowanego kodu automatycznie.
+
+## Ograniczenia prototypu
+
+- jakość wyniku zależy od modelu, okna kontekstowego i precyzji opisu,
+- długie generowanie może wymagać wydajnego serwera Ollama,
+- automatyczna recenzja nie zastępuje testów i przeglądu człowieka,
+- projekt nie jest usługą wieloużytkownikową ani gotowym sandboxem dla
+  niezaufanego kodu.

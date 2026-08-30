@@ -1,45 +1,54 @@
-from langgraph.graph import StateGraph, END
-from state import AgentState
+from typing import Literal
 
-# Importy agentów
+from langgraph.graph import END, StateGraph
+
+from agents.coder import coder_node
 from agents.manager import manager_node
 from agents.planner import planner_node
-from agents.coder import coder_node
 from agents.reviewer import reviewer_node
+from state import AgentState
+
+
+def route_manager(state: AgentState) -> Literal["planner", "coder", "reviewer", "end"]:
+    """Return only a route understood by the graph.
+
+    A missing or malformed manager result ends the current run safely instead
+    of raising a routing ``KeyError`` or accidentally selecting another node.
+    """
+    route = state.get("next_node")
+    if isinstance(route, str):
+        normalized = route.strip().lower()
+        if normalized in {"planner", "coder", "reviewer", "end"}:
+            return normalized  # type: ignore[return-value]
+    return "end"
+
 
 def create_graph():
     workflow = StateGraph(AgentState)
-    
-    # Dodajemy węzły
+
     workflow.add_node("manager", manager_node)
     workflow.add_node("planner", planner_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("reviewer", reviewer_node)
-    
-    # Start
-    workflow.set_entry_point("manager")
-    
-    # --- POPRAWIONY ROUTER ---
-    def router(state: AgentState):
-        # Manager zwraca po prostu string: "planner", "coder", "end"
-        return state["next_node"]
 
-    # Mapa przejść
+    workflow.set_entry_point("manager")
+
     workflow.add_conditional_edges(
         "manager",
-        router,
+        route_manager,
         {
             "planner": "planner",
             "coder": "coder",
-            "end": END  # <--- Tu mapujemy string "end" na obiekt END
-        }
+            "reviewer": "reviewer",
+            "end": END,
+        },
     )
-    
-    # Krawędzie zwykłe
+
     workflow.add_edge("planner", "manager")
     workflow.add_edge("coder", "reviewer")
     workflow.add_edge("reviewer", "manager")
-    
+
     return workflow.compile()
+
 
 app = create_graph()

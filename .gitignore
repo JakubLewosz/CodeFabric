@@ -1,32 +1,41 @@
-# --- WIRTUALNE ŚRODOWISKA (Najważniejsze) ---
-venv/
+# Środowiska wirtualne
 .venv/
+venv/
 env/
-Output/
 
-# --- PLIKI TYMCZASOWE PYTHON ---
+# Python, testy i narzędzia jakości
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
 
-# --- KONFIGURACJE SYSTEMOWE ---
+# Artefakty budowania i paczki tworzone z poziomu aplikacji
+build/
+dist/
+*.egg-info/
+*.zip
+Output/
+
+# Pliki systemowe
 .DS_Store
 Thumbs.db
 
-# --- PLIKI PROJEKTOWE ---
-# Ignorujemy zawartość workspace (generowane przez AI pliki)
-# Ale chcemy zachować sam folder, więc zostawiamy .gitkeep
+# Dane generowane przez CodeFabric
 workspace/*
 !workspace/.gitkeep
 chats/
 
-# --- IDE I EDYTORY ---
+# IDE i edytory
 .vscode/
 .idea/
 
-# --- ZMIENNE ŚRODOWISKOWE (BEZPIECZEŃSTWO) ---
+# Lokalne ustawienia i sekrety; przykładowa konfiguracja jest wersjonowana
 .env
-
-# --- SEKRETY ---
-.env
+.env.*
+!.env.example

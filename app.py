@@ -1,503 +1,679 @@
-import streamlit as st
-import os
-import time
-import shutil
-import json
-import uuid
-from datetime import datetime
-from graph.workflow import app
-from langchain_core.messages import HumanMessage
-from tools.file_ops import list_files, read_file, get_all_file_paths, write_file
+"""Streamlit interface for the CodeFabric multi-agent workflow."""
 
-# --- KONFIGURACJA STRONY ---
+from __future__ import annotations
+
+import logging
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+import streamlit as st
+from langchain_core.messages import HumanMessage
+
+from graph.workflow import app as workflow_app
+from tools import file_ops
+from tools.chat_store import DEFAULT_PROJECT_NAME, ChatStore, ChatStoreError
+from tools.llm_factory import OllamaStatus, get_ollama_status
+
+LOGGER = logging.getLogger(__name__)
+BASE_DIR = Path(__file__).resolve().parent
+_data_dir = os.getenv("CODEFABRIC_DATA_DIR", "").strip()
+_configured_data_dir = Path(_data_dir).expanduser() if _data_dir else Path("chats")
+CHATS_DIR = (
+    _configured_data_dir if _configured_data_dir.is_absolute() else BASE_DIR / _configured_data_dir
+)
+CHAT_STORE = ChatStore(CHATS_DIR)
+
+GREETING = (
+    "Cześć! Opisz pomysł, a przygotuję plan i przeprowadzę go przez implementację oraz review."
+)
+INITIAL_MESSAGES = [{"role": "assistant", "content": GREETING}]
+DEFAULT_MODELS = [
+    model.strip()
+    for model in os.getenv(
+        "CODEFABRIC_MODELS",
+        "qwen2.5-coder:7b",
+    ).split(",")
+    if model.strip()
+]
+CODE_LANGUAGES = {
+    ".css": "css",
+    ".html": "html",
+    ".js": "javascript",
+    ".json": "json",
+    ".jsx": "jsx",
+    ".md": "markdown",
+    ".py": "python",
+    ".sh": "bash",
+    ".toml": "toml",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+}
+
+
 st.set_page_config(
     page_title="CodeFabric | AI Software House",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded",
-    menu_items={
-        'About': "CodeFabric - Autonomiczny zespół AI do tworzenia oprogramowania"
-    }
+    menu_items={"About": "CodeFabric — lokalny zespół agentów AI do tworzenia oprogramowania"},
 )
 
-# --- KONFIGURACJA CHATÓW ---
-CHATS_DIR = "./chats"
-os.makedirs(CHATS_DIR, exist_ok=True)
 
-def get_chat_workspace(chat_id: str) -> str:
-    """Zwraca ścieżkę do workspace danego chatu"""
-    return os.path.join(CHATS_DIR, chat_id, "workspace")
+def inject_custom_css() -> None:
+    st.markdown(
+        """
+        <style>
+            .main { background-color: #0e1117; }
+            h1 {
+                background: -webkit-linear-gradient(45deg, #00d2ff, #7b61ff);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                font-weight: 750 !important;
+            }
+            section[data-testid="stSidebar"] {
+                background-color: #161b22;
+                border-right: 1px solid #30363d;
+            }
+            .stButton > button { border-radius: 8px; font-weight: 600; }
+            .stChatMessage {
+                background-color: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 12px;
+                padding: 10px;
+                margin-bottom: 10px;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-def get_chat_state_file(chat_id: str) -> str:
-    """Zwraca ścieżkę do pliku state danego chatu"""
-    return os.path.join(CHATS_DIR, chat_id, "state.json")
 
-def save_chat_state(chat_id: str, state: dict):
-    """Zapisuje stan chatu do pliku"""
-    os.makedirs(os.path.join(CHATS_DIR, chat_id), exist_ok=True)
-    with open(get_chat_state_file(chat_id), 'w', encoding='utf-8') as f:
-        json.dump(state, f, ensure_ascii=False, indent=2, default=str)
-
-def load_chat_state(chat_id: str) -> dict:
-    """Wczytuje stan chatu z pliku"""
-    state_file = get_chat_state_file(chat_id)
-    if os.path.exists(state_file):
-        with open(state_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return None
-
-def list_all_chats() -> list:
-    """Zwraca listę wszystkich chatów (id, nazwa, data)"""
-    chats = []
-    if not os.path.exists(CHATS_DIR):
-        return chats
-    
-    for chat_id in os.listdir(CHATS_DIR):
-        state_file = get_chat_state_file(chat_id)
-        if os.path.exists(state_file):
-            state = load_chat_state(chat_id)
-            chats.append({
-                'id': chat_id,
-                'name': state.get('name', 'Nowy projekt'),
-                'updated': state.get('updated', '')
-            })
-    
-    chats.sort(key=lambda x: x['updated'], reverse=True)
-    return chats
-
-def generate_chat_name(first_message: str) -> str:
-    """Generuje nazwę chatu na podstawie pierwszego prompta"""
-    name = first_message[:30].strip()
-    name = ' '.join(name.split())
-    return name if name else "Nowy projekt"
-
-def create_new_chat() -> str:
-    """Tworzy nowy chat i zwraca jego ID"""
-    chat_id = str(uuid.uuid4())[:8]
-    os.makedirs(get_chat_workspace(chat_id), exist_ok=True)
-    
-    save_chat_state(chat_id, {
-        'name': 'Nowy projekt',
-        'created': datetime.now().isoformat(),
-        'updated': datetime.now().isoformat(),
-        'messages': []
-    })
-    
+def create_project() -> str:
+    chat_id = CHAT_STORE.create()
+    try:
+        CHAT_STORE.save_messages(chat_id, list(INITIAL_MESSAGES))
+    except ChatStoreError:
+        try:
+            CHAT_STORE.delete(chat_id)
+        except ChatStoreError:
+            LOGGER.exception("Could not clean up a partially initialized project")
+        raise
     return chat_id
 
-# --- DOSTĘPNE MODELE ---
-AVAILABLE_MODELS = [
-    "qwen3-coder:30b", "bielik2.6:11b", "mistral-small3.2:24b", "gemma3:27b", 
-    "qwq:32b", "llama3.3:70b", "mistral:7b", "llama4:16x17b", "gpt-oss-safeguard:20b"
-]
 
-# --- CSS ---
-def inject_custom_css():
-    st.markdown("""
-    <style>
-        .main { background-color: #0E1117; }
-        h1 {
-            background: -webkit-linear-gradient(45deg, #00d2ff, #3a7bd5);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            font-weight: 700 !important;
-        }
-        section[data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; }
-        .stButton>button {
-            background: linear-gradient(90deg, #2b5876 0%, #4e4376 100%);
-            color: white; border: none; border-radius: 8px; height: 45px; font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-        .stChatMessage { background-color: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 10px; margin-bottom: 10px; }
-        .stStatusWidget { background-color: #0d1117; border: 1px solid #30363d; font-family: 'Courier New', monospace; color: #58a6ff; }
-    </style>
-    """, unsafe_allow_html=True)
+def load_project(chat_id: str) -> dict[str, Any] | None:
+    try:
+        return CHAT_STORE.load(chat_id)
+    except ChatStoreError as exc:
+        LOGGER.warning("Cannot load project %s: %s", chat_id, exc)
+        return None
+
+
+def persist_messages(chat_id: str, *, name: str | None = None) -> None:
+    messages = st.session_state.get("messages", INITIAL_MESSAGES)
+    CHAT_STORE.save_messages(chat_id, messages, name=name)
+
+
+def select_project(chat_id: str) -> None:
+    st.session_state["active_chat_id"] = chat_id
+    st.session_state["current_chat_loaded"] = None
+    st.session_state["pipeline_active"] = False
+    st.session_state.pop("graph_state", None)
+    st.session_state.pop("archive_payload", None)
+    st.session_state.pop("archive_chat_id", None)
+
+
+def set_flash(level: str, message: str) -> None:
+    st.session_state["flash_message"] = {"level": level, "message": message}
+
+
+def render_flash() -> None:
+    flash = st.session_state.pop("flash_message", None)
+    if not flash:
+        return
+    renderer = getattr(st, flash.get("level", "info"), st.info)
+    renderer(flash.get("message", ""))
+
+
+def review_decision(feedback: Any) -> str | None:
+    if not isinstance(feedback, str):
+        return None
+    match = re.match(r"^\s*(APPROVE|REJECT)\b", feedback, flags=re.IGNORECASE)
+    return match.group(1).upper() if match else None
+
+
+def merge_graph_update(target: dict[str, Any], update: dict[str, Any]) -> None:
+    """Merge LangGraph updates while preserving the message reducer semantics."""
+    for key, value in update.items():
+        if key == "messages" and value:
+            target[key] = [*target.get(key, []), *value]
+        else:
+            target[key] = value
+
+
+def workspace_files(chat_id: str) -> list[str]:
+    return file_ops.get_all_file_paths(workspace_dir=str(CHAT_STORE.workspace_path(chat_id)))
+
+
+def safe_archive_name(name: str) -> str:
+    slug = re.sub(r"[^\w.-]+", "_", name, flags=re.UNICODE).strip("._")
+    return f"{slug or 'codefabric-project'}.zip"
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def cached_ollama_status() -> OllamaStatus:
+    return get_ollama_status(timeout=1.5)
+
+
+def preferred_model_index(models: list[str], keywords: tuple[str, ...]) -> int:
+    for index, model in enumerate(models):
+        if any(keyword in model.lower() for keyword in keywords):
+            return index
+    return 0
+
 
 inject_custom_css()
 
-# === INICJALIZACJA AKTYWNEGO CHATU ===
-if "active_chat_id" not in st.session_state:
-    existing_chats = list_all_chats()
-    if existing_chats:
-        st.session_state["active_chat_id"] = existing_chats[0]['id']
-    else:
-        st.session_state["active_chat_id"] = create_new_chat()
+# Make sure the active project still exists (it may have been removed externally).
+try:
+    projects = CHAT_STORE.list()
+except ChatStoreError as exc:
+    st.error(f"Nie można odczytać katalogu projektów: {exc}")
+    st.stop()
+project_ids = {project["id"] for project in projects}
+active_chat_id = st.session_state.get("active_chat_id")
+if active_chat_id not in project_ids:
+    active_chat_id = projects[0]["id"] if projects else create_project()
+    st.session_state["active_chat_id"] = active_chat_id
+    projects = CHAT_STORE.list()
 
-# --- FUNKCJA BACKUP ---
-def create_backup():
-    """Tworzy backup workspace aktywnego chatu"""
-    chat_id = st.session_state.get("active_chat_id")
-    if not chat_id:
-        return None
-    
-    chat_workspace = get_chat_workspace(chat_id)
-    if os.path.exists(chat_workspace) and os.listdir(chat_workspace):
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        backups_dir = os.path.join(CHATS_DIR, chat_id, "backups")
-        os.makedirs(backups_dir, exist_ok=True)
-        backup_path = os.path.join(backups_dir, f"backup_{timestamp}")
-        shutil.copytree(chat_workspace, backup_path)
-        return backup_path
-    return None
+active_project = load_project(active_chat_id) or {
+    "name": DEFAULT_PROJECT_NAME,
+    "messages": list(INITIAL_MESSAGES),
+}
 
-# --- SIDEBAR ---
-with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/artificial-intelligence.png", width=60)
-    st.markdown("### **CodeFabric**")
-    st.divider()
-    
-    # === SEKCJA: PROJEKTY ===
-    st.markdown("#### 💬 Projekty")
-    
-    if st.button("➕ Nowy projekt", use_container_width=True, type="primary"):
-        new_chat_id = create_new_chat()
-        st.session_state["active_chat_id"] = new_chat_id
-        st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
-        st.session_state["current_chat_loaded"] = new_chat_id
-        if "graph_state" in st.session_state:
-            del st.session_state["graph_state"]
-        st.session_state["pipeline_active"] = False
-        st.rerun()
-    
-    # Lista chatów
-    all_chats = list_all_chats()
-    if all_chats:
-        st.markdown("**Ostatnie:**")
-        for chat in all_chats[:5]:
-            is_active = chat['id'] == st.session_state["active_chat_id"]
-            display_name = chat['name'][:30] + "..." if len(chat['name']) > 30 else chat['name']
-            
-            button_label = f"{'▶ ' if is_active else '○ '}{display_name}"
-            
-            if st.button(
-                button_label,
-                key=f"chat_{chat['id']}",
-                use_container_width=True,
-                disabled=is_active,
-                type="primary" if is_active else "secondary"
-            ):
-                chat_state = load_chat_state(st.session_state["active_chat_id"])
-                save_chat_state(st.session_state["active_chat_id"], {
-                    'name': chat_state.get('name', 'Nowy projekt') if chat_state else 'Nowy projekt',
-                    'updated': datetime.now().isoformat(),
-                    'messages': st.session_state.get("messages", []),
-                    'graph_state': st.session_state.get("graph_state", {})
-                })
-                
-                st.session_state["active_chat_id"] = chat['id']
-                st.session_state["current_chat_loaded"] = None
-                if "graph_state" in st.session_state:
-                    del st.session_state["graph_state"]
-                st.rerun()
-        
-        # Delete button
-        st.divider()
-        if st.button("🗑️ Usuń aktywny projekt", use_container_width=True, key="delete_active"):
-            active_id = st.session_state["active_chat_id"]
-            shutil.rmtree(os.path.join(CHATS_DIR, active_id))
-            remaining = [c for c in all_chats if c['id'] != active_id]
-            if remaining:
-                st.session_state["active_chat_id"] = remaining[0]['id']
-            else:
-                new_id = create_new_chat()
-                st.session_state["active_chat_id"] = new_id
-            st.session_state["current_chat_loaded"] = None
-            if "graph_state" in st.session_state:
-                del st.session_state["graph_state"]
-            st.rerun()
-    else:
-        st.info("Brak projektów", icon="📝")
-    
-    st.divider()
-    
-    # === SEKCJA: MODELE ===
-    st.markdown("#### 🧠 Wybór Modeli")
-    chat_model = st.selectbox("Architekt/Manager", AVAILABLE_MODELS, index=1, help="Model do planowania")
-    coder_model = st.selectbox("Programista", AVAILABLE_MODELS, index=0, help="Model do kodu")
-    st.divider()
-
-    # === SEKCJA: PLIKI ===
-    st.markdown("#### 📂 Pliki")
-    col1, col2 = st.columns(2)
-    if col1.button("🔄 Odśwież", use_container_width=True):
-        st.rerun()
-    
-    if col2.button("⏮️ Rollback", use_container_width=True):
-        chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
-        backups_dir = os.path.join(CHATS_DIR, st.session_state["active_chat_id"], "backups")
-        
-        backups = sorted([d for d in os.listdir(backups_dir) if d.startswith("backup_")], reverse=True) if os.path.exists(backups_dir) else []
-        if backups:
-            latest = os.path.join(backups_dir, backups[0])
-            if os.path.exists(chat_workspace):
-                shutil.rmtree(chat_workspace)
-            shutil.copytree(latest, chat_workspace)
-            st.success(f"Przywrócono: {backups[0]}")
-            time.sleep(1)
-            st.rerun()
-        else:
-            st.warning("Brak backupów")
-
-    # Lista plików
-    chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
-    import tools.file_ops as file_ops_module
-    original_workspace = file_ops_module.WORKSPACE_DIR
-    file_ops_module.WORKSPACE_DIR = chat_workspace
-    
-    files_str = list_files()
-    
-    if "No files" not in files_str and files_str.strip():
-        file_list = files_str.split(", ")
-        selected_file = st.selectbox("Podgląd:", file_list, index=None)
-        if selected_file:
-            content = read_file(selected_file)
-            st.code(content, language="python", line_numbers=True)
-    else:
-        st.info("Pusto.", icon="ℹ️")
-    
-    file_ops_module.WORKSPACE_DIR = original_workspace
-
-    st.divider()
-    
-    # Backup info
-    backups_dir = os.path.join(CHATS_DIR, st.session_state.get("active_chat_id", ""), "backups")
-    if os.path.exists(backups_dir):
-        backup_count = len([d for d in os.listdir(backups_dir) if d.startswith("backup_")])
-        st.caption(f"💾 Backupy: {backup_count}")
-    
-    # ZIP download
-    if st.button("📦 Pobierz ZIP", use_container_width=True):
-        chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
-        active_chat_state = load_chat_state(st.session_state["active_chat_id"])
-        chat_name = active_chat_state.get('name', 'projekt') if active_chat_state else 'projekt'
-        zip_name = chat_name.replace(' ', '_').replace('/', '_')
-        
-        if os.path.exists(chat_workspace) and os.listdir(chat_workspace):
-            shutil.make_archive(zip_name, 'zip', chat_workspace)
-            with open(f"{zip_name}.zip", "rb") as f:
-                st.download_button("📥 Pobierz", f, f"{zip_name}.zip", "application/zip", use_container_width=True)
-        else:
-            st.warning("Brak plików do spakowania")
-
-# --- GŁÓWNY CZAT ---
-st.title("CodeFabric AI")
-st.markdown("Twój autonomiczny zespół deweloperski.")
-st.divider()
-
-# Wczytaj stan aktywnego chatu
-active_chat_id = st.session_state["active_chat_id"]
-chat_state = load_chat_state(active_chat_id)
-
-if "messages" not in st.session_state or st.session_state.get("current_chat_loaded") != active_chat_id:
-    if chat_state and 'messages' in chat_state:
-        st.session_state["messages"] = chat_state['messages']
-    else:
-        st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
-    
+# Load the selected project's visible state before rendering either panel.
+if st.session_state.get("current_chat_loaded") != active_chat_id:
+    stored_messages = active_project.get("messages")
+    st.session_state["messages"] = (
+        stored_messages
+        if isinstance(stored_messages, list) and stored_messages
+        else list(INITIAL_MESSAGES)
+    )
     st.session_state["current_chat_loaded"] = active_chat_id
     st.session_state["pipeline_active"] = False
+    st.session_state.pop("graph_state", None)
 
-for msg in st.session_state["messages"]:
-    avatar = "🧑‍💻" if msg["role"] == "user" else "🤖"
-    with st.chat_message(msg["role"], avatar=avatar):
-        st.markdown(msg["content"])
+ollama_status = cached_ollama_status()
+available_models = list(ollama_status.models) or list(DEFAULT_MODELS)
+if not available_models:
+    available_models = ["qwen2.5-coder:7b"]
+pipeline_locked = bool(st.session_state.get("pipeline_active"))
 
-user_input = st.chat_input("Opisz projekt który chcesz stworzyć...")
+
+with st.sidebar:
+    st.markdown("## 🧩 CodeFabric")
+    st.caption("Planowanie → kod → automatyczne review")
+
+    if ollama_status.available:
+        if ollama_status.models:
+            st.success(f"Ollama online · {len(ollama_status.models)} modeli", icon="🟢")
+        else:
+            st.warning("Ollama działa, ale nie ma zainstalowanych modeli.", icon="🟡")
+    else:
+        st.warning("Ollama offline — generowanie nie będzie dostępne.", icon="🟠")
+
+    if st.button("Odśwież połączenie", use_container_width=True, key="refresh_ollama"):
+        cached_ollama_status.clear()
+        st.rerun()
+
+    st.divider()
+    st.markdown("#### Projekty")
+
+    if st.button(
+        "➕ Nowy projekt",
+        use_container_width=True,
+        type="primary",
+        disabled=pipeline_locked,
+    ):
+        try:
+            persist_messages(active_chat_id)
+            new_chat_id = create_project()
+        except ChatStoreError as exc:
+            st.error(f"Nie udało się zapisać bieżącego projektu: {exc}")
+        else:
+            select_project(new_chat_id)
+            st.rerun()
+
+    visible_projects = projects[:12]
+    if active_chat_id not in {project["id"] for project in visible_projects}:
+        active_summary = next(project for project in projects if project["id"] == active_chat_id)
+        visible_projects = [active_summary, *projects[:11]]
+
+    for project in visible_projects:
+        is_active = project["id"] == active_chat_id
+        display_name = project["name"]
+        if len(display_name) > 34:
+            display_name = f"{display_name[:31]}…"
+        if st.button(
+            f"{'▶' if is_active else '○'} {display_name}",
+            key=f"project_{project['id']}",
+            use_container_width=True,
+            disabled=is_active or pipeline_locked,
+        ):
+            try:
+                persist_messages(active_chat_id)
+            except ChatStoreError as exc:
+                st.error(f"Nie udało się zapisać bieżącego projektu: {exc}")
+            else:
+                select_project(project["id"])
+                st.rerun()
+
+    if len(projects) > 12:
+        visible_ids = {project["id"] for project in visible_projects}
+        remaining_projects = [project for project in projects if project["id"] not in visible_ids]
+        selected_project = st.selectbox(
+            "Pozostałe projekty",
+            options=[None, *[project["id"] for project in remaining_projects]],
+            format_func=lambda project_id: (
+                "Wybierz projekt…"
+                if project_id is None
+                else next(
+                    project["name"] for project in remaining_projects if project["id"] == project_id
+                )
+            ),
+            disabled=pipeline_locked,
+            key=f"remaining_project_selector_{active_chat_id}",
+        )
+        if st.button(
+            "Otwórz wybrany projekt",
+            use_container_width=True,
+            disabled=not selected_project or pipeline_locked,
+        ):
+            try:
+                persist_messages(active_chat_id)
+            except ChatStoreError as exc:
+                st.error(f"Nie udało się zapisać bieżącego projektu: {exc}")
+            else:
+                select_project(selected_project)
+                st.rerun()
+
+    if pipeline_locked:
+        st.caption("Zakończ lub anuluj bieżący etap, aby zmienić projekt.")
+
+    with st.popover(
+        "⚙️ Zarządzaj projektem",
+        use_container_width=True,
+        disabled=pipeline_locked,
+    ):
+        current_name = str(active_project.get("name") or DEFAULT_PROJECT_NAME)
+        renamed = st.text_input("Nazwa", value=current_name, key=f"rename_{active_chat_id}")
+        if st.button("Zapisz nazwę", use_container_width=True):
+            try:
+                persist_messages(active_chat_id, name=CHAT_STORE.project_name(renamed))
+                set_flash("success", "Nazwa projektu została zmieniona.")
+                st.rerun()
+            except ChatStoreError as exc:
+                st.error(str(exc))
+
+        st.divider()
+        confirm_delete = st.checkbox(
+            "Rozumiem, że projekt zostanie usunięty",
+            key=f"confirm_delete_{active_chat_id}",
+        )
+        if st.button(
+            "🗑️ Usuń projekt",
+            use_container_width=True,
+            disabled=not confirm_delete,
+        ):
+            try:
+                CHAT_STORE.delete(active_chat_id)
+                remaining = CHAT_STORE.list()
+                next_id = remaining[0]["id"] if remaining else create_project()
+                select_project(next_id)
+                set_flash("success", "Projekt został usunięty.")
+                st.rerun()
+            except ChatStoreError as exc:
+                st.error(str(exc))
+
+    st.divider()
+    st.markdown("#### Modele")
+    widgets_disabled = pipeline_locked
+    chat_model = st.selectbox(
+        "Architekt",
+        available_models,
+        index=preferred_model_index(available_models, ("bielik", "mistral", "llama")),
+        key=f"chat_model_{active_chat_id}",
+        disabled=widgets_disabled,
+    )
+    coder_model = st.selectbox(
+        "Programista",
+        available_models,
+        index=preferred_model_index(available_models, ("coder", "qwen")),
+        key=f"coder_model_{active_chat_id}",
+        disabled=widgets_disabled,
+    )
+    reviewer_model = st.selectbox(
+        "Recenzent",
+        available_models,
+        index=preferred_model_index(available_models, ("bielik", "mistral", "llama")),
+        key=f"reviewer_model_{active_chat_id}",
+        disabled=widgets_disabled,
+    )
+
+    st.divider()
+    st.markdown("#### Pliki")
+    files = workspace_files(active_chat_id)
+    if files:
+        selected_file = st.selectbox("Podgląd", files, index=None)
+        if selected_file:
+            content = file_ops.read_file(
+                selected_file,
+                workspace_dir=str(CHAT_STORE.workspace_path(active_chat_id)),
+            )
+            language = CODE_LANGUAGES.get(Path(selected_file).suffix.lower(), "text")
+            with st.expander(selected_file, expanded=True):
+                st.code(content, language=language, line_numbers=True)
+    else:
+        st.info("Workspace jest pusty.", icon="📂")
+
+    try:
+        backups = CHAT_STORE.list_backups(active_chat_id)
+    except ChatStoreError as exc:
+        backups = []
+        st.error(str(exc))
+    with st.popover(
+        f"⏮️ Rollback ({len(backups)})",
+        use_container_width=True,
+        disabled=not backups or pipeline_locked,
+    ):
+        selected_backup = st.selectbox("Wersja", backups, key=f"backup_{active_chat_id}")
+        st.caption("Przed rollbackiem bieżący stan zostanie zabezpieczony.")
+        confirm_restore = st.checkbox(
+            "Potwierdzam przywrócenie",
+            key=f"confirm_restore_{active_chat_id}",
+        )
+        if st.button(
+            "Przywróć backup",
+            use_container_width=True,
+            disabled=not confirm_restore,
+        ):
+            try:
+                CHAT_STORE.create_backup(active_chat_id)
+                CHAT_STORE.restore_backup(active_chat_id, selected_backup)
+                st.session_state.pop("archive_payload", None)
+                set_flash("success", f"Przywrócono {selected_backup}.")
+                st.rerun()
+            except ChatStoreError as exc:
+                st.error(str(exc))
+
+    if st.button(
+        "📦 Przygotuj ZIP",
+        use_container_width=True,
+        disabled=not files or pipeline_locked,
+    ):
+        try:
+            st.session_state["archive_payload"] = CHAT_STORE.build_zip(active_chat_id)
+            st.session_state["archive_chat_id"] = active_chat_id
+        except (ChatStoreError, OSError) as exc:
+            st.error(f"Nie udało się utworzyć ZIP-a: {exc}")
+
+    if (
+        st.session_state.get("archive_payload")
+        and st.session_state.get("archive_chat_id") == active_chat_id
+    ):
+        st.download_button(
+            "⬇️ Pobierz ZIP",
+            data=st.session_state["archive_payload"],
+            file_name=safe_archive_name(str(active_project.get("name") or "projekt")),
+            mime="application/zip",
+            use_container_width=True,
+        )
+
+
+st.title("CodeFabric AI")
+st.markdown("Lokalny zespół agentów, który zamienia opis projektu w plan, kod i raport jakości.")
+render_flash()
+
+for message in st.session_state["messages"]:
+    if not isinstance(message, dict):
+        continue
+    role = message.get("role") if message.get("role") in {"user", "assistant"} else "assistant"
+    content = str(message.get("content", ""))
+    with st.chat_message(role, avatar="🧑‍💻" if role == "user" else "🤖"):
+        st.markdown(content)
+
+pipeline_active = bool(st.session_state.get("pipeline_active"))
+user_input = st.chat_input(
+    "Opisz projekt albo kolejną zmianę…",
+    disabled=pipeline_active,
+    max_chars=20_000,
+)
 
 if user_input:
     st.session_state["messages"].append({"role": "user", "content": user_input})
-    with st.chat_message("user", avatar="🧑‍💻"):
-        st.markdown(user_input)
-    
-    # Backup
-    backup_path = create_backup()
-    if backup_path:
-        st.toast(f"💾 Backup utworzony", icon="✅")
-    
-    # Generuj nazwę z pierwszego prompta
-    active_chat_state = load_chat_state(st.session_state["active_chat_id"])
-    if active_chat_state and active_chat_state.get('name') == 'Nowy projekt':
-        new_name = generate_chat_name(user_input)
-        active_chat_state['name'] = new_name
-        save_chat_state(st.session_state["active_chat_id"], active_chat_state)
-    
-    # Zapisz wiadomości
-    if active_chat_state:
-        active_chat_state['messages'] = st.session_state["messages"]
-        active_chat_state['updated'] = datetime.now().isoformat()
-        save_chat_state(st.session_state["active_chat_id"], active_chat_state)
-    
-    st.session_state["pipeline_active"] = True
-    if "graph_state" in st.session_state: 
-        del st.session_state["graph_state"]
-    st.rerun()
+    try:
+        backup_name = CHAT_STORE.create_backup(active_chat_id)
+        if backup_name:
+            st.toast("Bieżący workspace zabezpieczony", icon="💾")
 
-# --- LOGIKA LANGGRAPH ---
+        project_state = load_project(active_chat_id) or {}
+        project_name = str(project_state.get("name") or DEFAULT_PROJECT_NAME)
+        if project_name == DEFAULT_PROJECT_NAME:
+            project_name = CHAT_STORE.project_name(user_input)
+        persist_messages(active_chat_id, name=project_name)
+    except ChatStoreError as exc:
+        st.session_state["messages"].pop()
+        st.error(str(exc))
+    else:
+        st.session_state["pipeline_active"] = True
+        st.session_state.pop("graph_state", None)
+        st.session_state.pop("archive_payload", None)
+        st.rerun()
+
+
 if st.session_state.get("pipeline_active"):
-    
     if "graph_state" not in st.session_state:
-        chat_workspace = get_chat_workspace(st.session_state["active_chat_id"])
-        
-        import tools.file_ops as file_ops_module
-        original_ws = file_ops_module.WORKSPACE_DIR
-        file_ops_module.WORKSPACE_DIR = chat_workspace
-        
-        existing_files = get_all_file_paths()
-        
-        file_ops_module.WORKSPACE_DIR = original_ws
-        
+        last_user_message = next(
+            (
+                str(message.get("content", ""))
+                for message in reversed(st.session_state["messages"])
+                if isinstance(message, dict) and message.get("role") == "user"
+            ),
+            "",
+        )
         st.session_state["graph_state"] = {
-            "messages": [HumanMessage(content=st.session_state["messages"][-1]["content"])],
-            "current_files": existing_files,
+            "messages": [HumanMessage(content=last_user_message)],
+            "current_files": workspace_files(active_chat_id),
             "plan": None,
             "plan_approved": False,
             "feedback": None,
             "revision_count": 0,
             "next_node": "manager",
-            "model_names": {"chat": chat_model, "coder": coder_model},
-            "chat_workspace": chat_workspace
+            "model_names": {
+                "chat": chat_model,
+                "coder": coder_model,
+                "reviewer": reviewer_model,
+            },
+            "chat_workspace": str(CHAT_STORE.workspace_path(active_chat_id)),
         }
 
-    status_placeholder = st.empty()
-    action_placeholder = st.empty()
-    
     current_state = st.session_state["graph_state"]
-    
     plan = current_state.get("plan")
-    is_approved = current_state.get("plan_approved")
+    plan_approved = current_state.get("plan_approved", False)
     feedback = current_state.get("feedback")
     next_node = current_state.get("next_node")
+    decision = review_decision(feedback)
 
-    # Decyzja: czy uruchamiać graf?
-    should_run_graph = True
-    
-    if plan and not is_approved and not feedback:
-        should_run_graph = False 
+    should_run_graph = not (
+        (plan and not plan_approved and feedback is None)
+        or next_node == "end"
+        or decision == "APPROVE"
+    )
 
-    if next_node == "end":
-        should_run_graph = False
-        
-    if feedback and "APPROVE" in str(feedback).upper():
-        should_run_graph = False
-
-    # Uruchamianie grafu
     if should_run_graph:
-        with status_placeholder.container():
-            status = st.status("🚀 AI pracuje...", expanded=True)
-            progress_bar = st.progress(0, text="Start...")
-            step = 0
-            
+        status = st.status("AI pracuje…", expanded=True)
+        progress_bar = st.progress(0, text="Uruchamiam zespół…")
+        step = 0
+        try:
+            for event in workflow_app.stream(
+                current_state,
+                config={"recursion_limit": 20},
+                stream_mode="updates",
+            ):
+                step += 1
+                progress = min(0.12 + step * 0.11, 0.95)
+                for node, update in event.items():
+                    merge_graph_update(st.session_state["graph_state"], update)
+                    if node == "planner":
+                        progress_bar.progress(progress, "Architekt przygotowuje plan…")
+                        status.write("🧠 **Architekt:** plan techniczny gotowy do oceny.")
+                    elif node == "coder":
+                        revision = update.get("revision_count", 0)
+                        label = (
+                            "implementuje projekt"
+                            if revision == 0
+                            else f"wprowadza poprawki v{revision}"
+                        )
+                        progress_bar.progress(progress, f"Programista {label}…")
+                        status.write(f"👨‍💻 **Programista:** {label}.")
+                    elif node == "reviewer":
+                        progress_bar.progress(progress, "Recenzent sprawdza wynik…")
+                        status.write("🔎 **Recenzent:** sprawdzam kompletność i jakość.")
+
+            progress_bar.progress(1.0, "Etap zakończony")
+            status.update(label="Etap zakończony", state="complete", expanded=False)
+        except Exception as exc:  # Streamlit must remain usable after provider errors.
+            LOGGER.exception("CodeFabric workflow failed")
+            error_message = f"Proces został przerwany: {exc}"
+            st.session_state["messages"].append(
+                {"role": "assistant", "content": f"⚠️ {error_message}"}
+            )
             try:
-                for event in app.stream(current_state):
-                    step += 1
-                    prog = min(step / 8, 0.95)
-                    
-                    for node, new_state in event.items():
-                        st.session_state["graph_state"].update(new_state)
-                        current_state = st.session_state["graph_state"]
-                        
-                        if node == "planner":
-                            progress_bar.progress(prog, "🧠 Architekt: Planuję...")
-                            status.write("🧠 **Architekt:** Tworzę plan techniczny...")
-                            if "plan" in new_state:
-                                with st.expander("📜 Zobacz Plan", expanded=False):
-                                    st.markdown(new_state["plan"])
-                                    
-                        elif node == "coder":
-                            rev = new_state.get("revision_count", 0)
-                            msg = "Piszę kod..." if rev == 0 else f"Poprawki (v{rev})..."
-                            progress_bar.progress(prog, f"👨‍💻 {msg}")
-                            status.write(f"👨‍💻 **Programista:** {msg}")
-                            time.sleep(0.2)
-                            
-                        elif node == "reviewer":
-                            progress_bar.progress(prog, "🔎 Recenzent: Sprawdzam...")
-                            status.write("🔎 **Recenzent:** Weryfikacja jakości...")
-                            if "feedback" in new_state:
-                                with st.expander("📋 Raport", expanded=True):
-                                    st.markdown(new_state["feedback"])
-                
-                status.update(label="Etap zakończony", state="running", expanded=False)
-                progress_bar.empty()
-                st.rerun()
-
-            except Exception as e:
-                status.update(label="Błąd", state="error")
-                st.error(f"Błąd: {e}")
-                st.session_state["pipeline_active"] = False
-
-    # Interfejs decyzji
-    plan = st.session_state["graph_state"].get("plan")
-    is_approved = st.session_state["graph_state"].get("plan_approved")
-    next_node = st.session_state["graph_state"].get("next_node")
-    last_feedback = st.session_state["graph_state"].get("feedback", "")
-
-    # Scenariusz A: Decyzja o planie
-    if plan and not is_approved:
-        with action_placeholder.container():
-            st.info("🧠 **Architekt przygotował plan.**", icon="📋")
-            with st.expander("📜 ZOBACZ PLAN", expanded=True):
-                st.markdown(plan)
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            if st.button("✅ Zatwierdź i Rozpocznij Kodowanie", type="primary", use_container_width=True, key="btn_approve"):
-                st.session_state["graph_state"]["plan_approved"] = True
-                st.session_state["graph_state"]["feedback"] = None
-                st.session_state["graph_state"]["next_node"] = "manager" 
-                st.rerun()
-            
-            st.markdown("**Lub podaj uwagi do poprawy:**")
-            user_feedback = st.text_area("Uwagi:", placeholder="Co chcesz zmienić w planie?", key="input_feedback")
-            if st.button("🔄 Popraw Plan", use_container_width=True, key="btn_reject"):
-                if user_feedback:
-                    st.session_state["graph_state"]["feedback"] = user_feedback
-                    st.session_state["graph_state"]["plan"] = None
-                    st.session_state["graph_state"]["plan_approved"] = False
-                    st.session_state["graph_state"]["next_node"] = "manager"
-                    st.rerun()
-                else:
-                    st.warning("Wpisz uwagi do poprawy.")
-
-    # Scenariusz B: Sukces
-    elif next_node == "end":
-        if not last_feedback or "APPROVE" in str(last_feedback).upper():
+                persist_messages(active_chat_id)
+            except ChatStoreError:
+                LOGGER.exception("Could not persist workflow error")
             st.session_state["pipeline_active"] = False
-            
-            with action_placeholder.container():
-                st.success("✅ **Projekt gotowy!**")
-                
-                important_files = [f for f in get_all_file_paths() if any(f.endswith(ext) for ext in ['.py', '.js', '.html', '.md'])]
-                if important_files:
-                    st.markdown("**📦 Wygenerowane pliki:**")
-                    for f in important_files:
-                        st.markdown(f"- `{f}`")
-                
-                st.info("💬 Możesz teraz dodać kolejne funkcje - po prostu napisz co chcesz zmienić!", icon="✨")
-                
-                if st.button("🆕 Nowy projekt", key="btn_finish", use_container_width=True):
-                    new_chat_id = create_new_chat()
-                    st.session_state["active_chat_id"] = new_chat_id
-                    st.session_state["messages"] = [{"role": "assistant", "content": "Cześć! Co dzisiaj budujemy?"}]
-                    st.session_state["current_chat_loaded"] = new_chat_id
-                    if "graph_state" in st.session_state:
-                        del st.session_state["graph_state"]
-                    st.session_state["pipeline_active"] = False
-                    st.rerun()
-        else:
-            with action_placeholder.container():
-                st.warning("⚠️ Proces zatrzymany z błędami.")
-                st.markdown(f"**Ostatni feedback:**\n{last_feedback}")
-                
-                col1, col2 = st.columns(2)
-                if col1.button("🔄 Spróbuj ponownie", key="btn_retry", use_container_width=True):
-                    st.session_state["graph_state"]["revision_count"] = 0
-                    st.session_state["graph_state"]["feedback"] = None
-                    st.session_state["graph_state"]["next_node"] = "manager"
-                    st.rerun()
-                
-                if col2.button("🗑️ Reset", key="btn_reset_err", use_container_width=True):
-                    del st.session_state["graph_state"]
-                    st.session_state["pipeline_active"] = False
-                    st.rerun()
+            set_flash("error", error_message)
+            st.rerun()
+
+    current_state = st.session_state["graph_state"]
+    plan = current_state.get("plan")
+    plan_approved = current_state.get("plan_approved", False)
+    next_node = current_state.get("next_node")
+    feedback = current_state.get("feedback")
+    decision = review_decision(feedback)
+
+    if plan and not plan_approved:
+        st.info("Architekt przygotował plan. Zatwierdź go albo doprecyzuj wymagania.", icon="📋")
+        with st.expander("Plan techniczny", expanded=True):
+            st.markdown(str(plan))
+
+        approve_col, cancel_col = st.columns([3, 1])
+        if approve_col.button(
+            "✅ Zatwierdź i rozpocznij kodowanie",
+            type="primary",
+            use_container_width=True,
+        ):
+            current_state["plan_approved"] = True
+            current_state["feedback"] = None
+            current_state["next_node"] = "manager"
+            st.rerun()
+        if cancel_col.button("Anuluj", use_container_width=True):
+            st.session_state["messages"].append(
+                {"role": "assistant", "content": "Plan został anulowany bez zmiany plików."}
+            )
+            try:
+                persist_messages(active_chat_id)
+            except ChatStoreError:
+                LOGGER.exception("Could not persist cancelled plan")
+            st.session_state["pipeline_active"] = False
+            st.session_state.pop("graph_state", None)
+            set_flash("info", "Plan anulowano. Możesz podać nowe wymagania.")
+            st.rerun()
+
+        plan_feedback = st.text_area(
+            "Uwagi do planu",
+            placeholder="Np. użyj FastAPI zamiast Flask i dodaj testy integracyjne…",
+            max_chars=5_000,
+        )
+        if st.button("🔄 Popraw plan", use_container_width=True):
+            if plan_feedback.strip():
+                current_state["feedback"] = plan_feedback.strip()
+                current_state["plan"] = None
+                current_state["plan_approved"] = False
+                current_state["next_node"] = "manager"
+                st.rerun()
+            else:
+                st.warning("Dodaj krótką informację, co należy zmienić.")
+
+    elif next_node == "end" and not current_state.get("last_error") and decision != "REJECT":
+        generated_files = workspace_files(active_chat_id)
+        file_summary = "\n".join(f"- `{path}`" for path in generated_files[:20])
+        if len(generated_files) > 20:
+            file_summary += f"\n- …oraz {len(generated_files) - 20} kolejnych"
+        completion = "✅ Projekt przeszedł pełny przepływ CodeFabric."
+        if file_summary:
+            completion += f"\n\nPliki w workspace:\n{file_summary}"
+        st.session_state["messages"].append({"role": "assistant", "content": completion})
+        try:
+            persist_messages(active_chat_id)
+        except ChatStoreError:
+            LOGGER.exception("Could not persist completion message")
+        st.session_state["pipeline_active"] = False
+        set_flash("success", "Projekt jest gotowy. Możesz teraz opisać kolejną zmianę.")
+        st.rerun()
+
+    elif next_node == "end":
+        failure_stage = current_state.get("error_stage") or "reviewer"
+        failure_stage_label = {
+            "planner": "planowania",
+            "coder": "kodowania",
+            "reviewer": "recenzji",
+            "quality": "pętli poprawek jakościowych",
+        }.get(failure_stage, "przetwarzania")
+        st.warning(f"Proces zatrzymał się na etapie {failure_stage_label}.", icon="⚠️")
+        if feedback:
+            with st.expander("Ostatni raport", expanded=True):
+                st.markdown(str(feedback))
+                if current_state.get("last_error"):
+                    st.caption(f"Szczegóły techniczne: {current_state['last_error']}")
+        retry_col, stop_col = st.columns(2)
+        if retry_col.button("🔄 Spróbuj ponownie", use_container_width=True):
+            current_state["revision_count"] = 0
+            current_state["next_node"] = "manager"
+            if current_state.get("plan"):
+                if current_state.get("error_stage") == "reviewer":
+                    current_state["retry_stage"] = "reviewer"
+                elif current_state.get("error_stage") == "quality" or (
+                    current_state.get("error_stage") == "coder"
+                    and review_decision(current_state.get("retry_feedback")) == "REJECT"
+                ):
+                    current_state["retry_stage"] = "coder_quality"
+                else:
+                    current_state["retry_stage"] = "coder"
+            else:
+                current_state["feedback"] = None
+            st.rerun()
+        if stop_col.button("Zakończ", use_container_width=True):
+            st.session_state["messages"].append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"⚠️ Proces zakończono na etapie {failure_stage_label}. "
+                        "Pliki pozostają dostępne w workspace."
+                    ),
+                }
+            )
+            try:
+                persist_messages(active_chat_id)
+            except ChatStoreError:
+                LOGGER.exception("Could not persist stopped workflow state")
+            st.session_state["pipeline_active"] = False
+            st.session_state.pop("graph_state", None)
+            set_flash("warning", f"Proces zakończono na etapie {failure_stage_label}.")
+            st.rerun()
