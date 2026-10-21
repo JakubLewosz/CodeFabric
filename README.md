@@ -1,103 +1,93 @@
 # CodeFabric
 
-CodeFabric is a completed solo portfolio prototype for AI-assisted software
-project generation. A user describes a new application or a requested change;
-CodeFabric prepares a plan, pauses for approval or revision, generates or edits
-project files, and performs an LLM-based review against the approved plan.
+CodeFabric to ukończony, indywidualny prototyp portfolio do generowania projektów programistycznych z pomocą AI. Użytkownik opisuje nową aplikację lub zmianę. CodeFabric przygotowuje plan, czeka na jego zatwierdzenie albo korektę, generuje lub edytuje pliki i wykonuje przegląd z użyciem modelu językowego, porównując rezultat z zatwierdzonym planem.
 
-The application uses locally or privately hosted [Ollama](https://ollama.com/)
-models at runtime. It does not connect to OpenAI Codex and does not use Codex as
-a model provider.
+Aplikacja używa modeli [Ollamy](https://ollama.com/) uruchomionych lokalnie lub na prywatnym serwerze. Nie łączy się z OpenAI Codex i nie korzysta z niego jako dostawcy modeli.
 
-I originally developed CodeFabric during a 150-hour Vocational Software
-Development Internship at the Office of the Polish Financial Supervision
-Authority (UKNF) in Warsaw, from 3 November to 3 December 2025. I continued
-refining it independently after the internship.
+Projekt powstał podczas 150-godzinnych praktyk programistycznych w Urzędzie Komisji Nadzoru Finansowego w Warszawie, od 3 listopada do 3 grudnia 2025 r. Po praktykach był rozwijany samodzielnie.
 
-> **Internship-project disclaimer:** CodeFabric was developed as an individual
-> internship project and was not an official product or production system of
-> the Office of the Polish Financial Supervision Authority.
+> **Status projektu z praktyk:** CodeFabric jest indywidualnym projektem z praktyk, a nie oficjalnym produktem ani systemem produkcyjnym Urzędu Komisji Nadzoru Finansowego.
 
-## What the prototype demonstrates
+<a id="what-the-prototype-demonstrates"></a>
 
-- A Streamlit interface for describing a new application or a change to an
-  existing project.
-- Planner, coder, reviewer, and manager roles coordinated through a LangGraph
-  workflow.
-- A human checkpoint before implementation: the user can approve the plan,
-  request revisions, or cancel without changing project files.
-- Project-file generation and targeted edits using Ollama models selected in
-  the interface.
-- An LLM-based review loop that inspects text files against the approved plan
-  and allows up to three correction attempts.
-- Separate persistent workspaces and saved conversation history for each
-  project.
-- File preview, backups, rollback, and ZIP export.
+## Co pokazuje prototyp
 
-The current application interface is in Polish. Generated code is not executed
-automatically and must be inspected, run, and tested by a person before use.
-The LLM review is a consistency check, not a correctness guarantee or a
-replacement for human testing.
+- Interfejs Streamlit do opisywania nowej aplikacji lub zmiany w istniejącym projekcie.
+- Role planisty, programisty, recenzenta i menedżera koordynowane przez LangGraph.
+- Zatwierdzanie przez użytkownika przed implementacją: akceptacja planu, prośba o zmiany albo anulowanie bez modyfikacji plików projektu.
+- Generowanie plików i celowane edycje z wykorzystaniem modeli Ollamy wybranych w interfejsie.
+- Przegląd plików tekstowych przez model językowy względem zatwierdzonego planu, z najwyżej trzema próbami korekty.
+- Oddzielne, trwałe przestrzenie robocze i zapisywanie historii rozmowy dla każdego projektu.
+- Podgląd plików, kopie zapasowe, przywracanie i eksport ZIP.
 
-## Workflow
+Interfejs aplikacji jest po polsku. Wygenerowany kod nie jest automatycznie wykonywany — przed użyciem człowiek musi go przejrzeć, uruchomić i przetestować. Przegląd przez model jest sprawdzeniem spójności, nie gwarancją poprawności ani zamiennikiem testów wykonywanych przez człowieka.
+
+<a id="workflow"></a>
+
+## Przebieg pracy
 
 ```mermaid
 flowchart LR
-    U["Project or change description"] --> M["Manager"]
-    M --> P["Planner"]
-    P --> A{"User review"}
-    A -->|Revise| P
-    A -->|Cancel| E["Stop without implementation"]
-    A -->|Approve| C["Coder"]
-    C --> R["Reviewer"]
-    R -->|Approved| D["Files remain in the project workspace"]
-    R -->|Changes requested, up to 3 attempts| C
+    U["Opis projektu lub zmiany"] --> M["Menedżer"]
+    M --> P["Planista"]
+    P --> A{"Ocena użytkownika"}
+    A -->|Popraw plan| P
+    A -->|Anuluj| E["Zatrzymanie bez implementacji"]
+    A -->|Zatwierdź| C["Programista"]
+    C --> R["Recenzent"]
+    R -->|Zatwierdzono| D["Pliki pozostają w przestrzeni roboczej projektu"]
+    R -->|Wymagane poprawki, do 3 prób| C
 ```
 
-| Component | Responsibility |
+| Element | Odpowiedzialność |
 | --- | --- |
-| `app.py` | Streamlit interface, project sessions, approval controls, and file tools |
-| `graph/workflow.py` | LangGraph nodes and routing |
-| `agents/planner.py` | Prepares a file-level implementation plan |
-| `agents/coder.py` | Creates or edits supported text files after approval |
-| `agents/reviewer.py` | Uses an LLM to compare generated files with the approved plan |
-| `agents/manager.py` | Controls deterministic routing and the correction limit |
-| `tools/llm_factory.py` | Configures access to local or private Ollama instances |
-| `tools/chat_store.py` | Persists project history, workspaces, backups, and ZIP exports |
+| `app.py` | Interfejs Streamlit, sesje projektów, zatwierdzanie i narzędzia do plików |
+| `graph/workflow.py` | Węzły LangGraph i kierowanie przebiegiem pracy |
+| `agents/planner.py` | Przygotowanie planu implementacji na poziomie plików |
+| `agents/coder.py` | Tworzenie i edycja obsługiwanych plików tekstowych po zatwierdzeniu |
+| `agents/reviewer.py` | Porównywanie wygenerowanych plików z planem przy użyciu modelu |
+| `agents/manager.py` | Deterministyczne sterowanie przebiegiem i limitem poprawek |
+| `tools/llm_factory.py` | Konfiguracja dostępu do lokalnych lub prywatnych instancji Ollamy |
+| `tools/chat_store.py` | Zapis historii, przestrzeni roboczych, kopii zapasowych i eksport ZIP |
 
-## Technologies
+<a id="technologies"></a>
+
+## Technologie
 
 - Python
 - Streamlit
 - LangGraph
-- LangChain Core and LangChain Ollama
+- LangChain Core i LangChain Ollama
 - Ollama
 - pytest
 - Ruff
 - GitHub Actions
 
-## Requirements
+<a id="requirements"></a>
 
-- Python 3.10 or newer
-- An [Ollama installation](https://ollama.com/download), either on the same
-  computer or on a private server reachable from it
-- At least one Ollama model available to the application
+## Wymagania
 
-Larger models may require substantial RAM or VRAM. The default configuration
-uses `qwen2.5-coder:7b`, but the interface can use other models reported by the
-configured Ollama instance.
+- Python 3.10 lub nowszy.
+- [Zainstalowana Ollama](https://ollama.com/download) na tym samym komputerze lub dostępnym prywatnym serwerze.
+- Co najmniej jeden model Ollamy dostępny dla aplikacji.
 
-## Setup
+Większe modele mogą wymagać znacznej ilości RAM lub VRAM. Domyślna konfiguracja używa `qwen2.5-coder:7b`, ale interfejs obsługuje także inne modele zgłaszane przez skonfigurowaną instancję Ollamy.
 
-### 1. Start Ollama and download a model
+<a id="setup"></a>
 
-Install and start Ollama, then download the default model:
+## Uruchomienie
+
+<a id="1-start-ollama-and-download-a-model"></a>
+
+### 1. Uruchom Ollamę i pobierz model
+
+Zainstaluj i uruchom Ollamę, a następnie pobierz domyślny model:
 
 ```bash
 ollama pull qwen2.5-coder:7b
 ```
 
-On macOS, Ollama can also be installed and started with Homebrew:
+Na macOS Ollamę można także zainstalować i uruchomić przez Homebrew:
 
 ```bash
 brew install ollama
@@ -105,7 +95,9 @@ brew services start ollama
 ollama pull qwen2.5-coder:7b
 ```
 
-### 2. Run CodeFabric on macOS or Linux
+<a id="2-run-codefabric-on-macos-or-linux"></a>
+
+### 2. Uruchom CodeFabric na macOS lub Linux
 
 ```bash
 git clone https://github.com/JakubLewosz/CodeFabric.git
@@ -118,7 +110,9 @@ cp .env.example .env
 python -m streamlit run app.py
 ```
 
-### 3. Run CodeFabric on Windows PowerShell
+<a id="3-run-codefabric-on-windows-powershell"></a>
+
+### 3. Uruchom CodeFabric w Windows PowerShell
 
 ```powershell
 git clone https://github.com/JakubLewosz/CodeFabric.git
@@ -131,15 +125,15 @@ Copy-Item .env.example .env
 python -m streamlit run app.py
 ```
 
-As an alternative on Windows, run `run.bat`. The script checks the Python
-version, creates `.venv`, installs the dependencies, and starts the application.
+Alternatywnie w Windows uruchom `run.bat`. Skrypt sprawdza wersję Pythona, tworzy `.venv`, instaluje zależności i uruchamia aplikację.
 
-After startup, open <http://localhost:8501>.
+Po uruchomieniu otwórz <http://localhost:8501>.
 
-## Configuration
+<a id="configuration"></a>
 
-CodeFabric reads its settings from `.env`. Copy `.env.example` and adjust only
-the values needed for your Ollama instance:
+## Konfiguracja
+
+CodeFabric odczytuje ustawienia z `.env`. Skopiuj `.env.example` i zmień tylko wartości wymagane przez Twoją instancję Ollamy:
 
 ```dotenv
 OLLAMA_BASE_URL=http://localhost:11434
@@ -151,70 +145,61 @@ MODEL_CODER=qwen2.5-coder:7b
 OLLAMA_TIMEOUT=120
 ```
 
-| Variable | Purpose |
+| Zmienna | Znaczenie |
 | --- | --- |
-| `OLLAMA_BASE_URL` | URL of the local or private Ollama server |
-| `OLLAMA_TOKEN` | Optional bearer token; keep it out of version control |
-| `VERIFY_SSL` | TLS certificate verification; disable only for a trusted server with a self-signed certificate |
-| `CODEFABRIC_DATA_DIR` | Local directory for project history, workspaces, and backups |
-| `CODEFABRIC_MODELS` | Fallback model list when the server does not return one |
-| `MODEL_CODER` | Model used only by the diagnostic script |
-| `OLLAMA_TIMEOUT` | Request timeout used by the agents and diagnostic script |
+| `OLLAMA_BASE_URL` | Adres lokalnego lub prywatnego serwera Ollamy |
+| `OLLAMA_TOKEN` | Opcjonalny token bearer; nie zapisuj go w kontroli wersji |
+| `VERIFY_SSL` | Weryfikacja certyfikatu TLS; wyłączenie przewidziano tylko dla zaufanego serwera z certyfikatem samopodpisanym |
+| `CODEFABRIC_DATA_DIR` | Lokalny katalog historii, przestrzeni roboczych i kopii zapasowych |
+| `CODEFABRIC_MODELS` | Zapasowa lista modeli, gdy serwer jej nie zwróci |
+| `MODEL_CODER` | Model używany wyłącznie przez skrypt diagnostyczny |
+| `OLLAMA_TIMEOUT` | Limit czasu żądania używany przez agentów i skrypt diagnostyczny |
 
-The default `./chats` data directory is ignored by Git. If you choose another
-path inside the repository, add it to `.gitignore`, or store the data outside
-the repository.
+Domyślny katalog `./chats` jest ignorowany przez Git. Po wybraniu innej ścieżki wewnątrz repozytorium dodaj ją do `.gitignore` albo przechowuj dane poza repozytorium.
 
-To test the Ollama connection independently of Streamlit, run:
+Aby sprawdzić połączenie z Ollamą niezależnie od Streamlit, uruchom:
 
 ```bash
 python debug_raw.py
 ```
 
-This diagnostic makes a real model request. The repository's regular tests do
-not require a running Ollama instance.
+Diagnostyka wysyła rzeczywiste żądanie do modelu. Zwykłe testy repozytorium nie wymagają działającej instancji Ollamy.
 
-## Verification and quality tooling
+<a id="verification-and-quality-tooling"></a>
 
-Install the development dependencies and run the repository checks:
+## Weryfikacja i narzędzia jakości
+
+Zainstaluj zależności deweloperskie i uruchom sprawdzenia:
 
 ```bash
 python -m pip install -r requirements-dev.txt
 bash scripts/check.sh
 ```
 
-The script compiles the Python modules, checks formatting and lint rules with
-Ruff, and runs the repository's pytest suite. GitHub Actions is configured to
-run the same script on Python 3.10 and 3.12 on Ubuntu and on Python 3.12 on
-Windows. These checks cover CodeFabric itself; they do not execute or fully
-test applications generated by CodeFabric.
+Skrypt kompiluje moduły Pythona, sprawdza formatowanie i reguły Ruff oraz uruchamia pytest. GitHub Actions wykonuje ten sam skrypt na Pythonie 3.10 i 3.12 w Ubuntu oraz na Pythonie 3.12 w Windows. Sprawdzenia dotyczą samego CodeFabric — nie uruchamiają ani nie testują w pełni aplikacji przez niego wygenerowanych.
 
-## Data handling and boundaries
+<a id="data-handling-and-boundaries"></a>
 
-- `.env`, saved conversations, backups, and generated project files are
-  excluded from version control by the repository configuration.
-- An optional token is sent only to the configured Ollama server.
-- CodeFabric writes supported text files inside the selected project workspace.
-- It does not automatically install generated dependencies or run generated
-  applications.
-- Review generated source code and dependencies before running them.
+## Dane i granice działania
 
-## Prototype limitations
+- `.env`, zapisane rozmowy, kopie zapasowe i wygenerowane pliki projektów są wyłączone z kontroli wersji przez konfigurację repozytorium.
+- Opcjonalny token jest wysyłany tylko do skonfigurowanego serwera Ollamy.
+- CodeFabric zapisuje obsługiwane pliki tekstowe wewnątrz wybranej przestrzeni roboczej projektu.
+- Nie instaluje automatycznie wygenerowanych zależności ani nie uruchamia wygenerowanych aplikacji.
+- Przed uruchomieniem sprawdź wygenerowany kod i zależności.
 
-- Output quality depends on the selected model, its context window, and the
-  clarity of the request.
-- Larger projects can exceed the bounded context made available to a model.
-- The reviewer performs an LLM-based inspection; it does not prove that the
-  generated program is correct, secure, or production-ready.
-- CodeFabric is not a multi-user service or an execution sandbox for untrusted
-  code.
-- This is a completed portfolio prototype and is not currently under active
-  development.
+<a id="prototype-limitations"></a>
 
-## Development process
+## Ograniczenia prototypu
 
-CodeFabric was developed using an AI-assisted workflow, with OpenAI Codex
-supporting planning, implementation, debugging, and review. I remained
-responsible for defining requirements, inspecting changes, running the
-application, testing its behaviour, and correcting issues. Codex was a
-development tool; the CodeFabric runtime uses Ollama.
+- Jakość wyniku zależy od wybranego modelu, jego okna kontekstowego i jasności polecenia.
+- Większe projekty mogą przekroczyć ograniczony kontekst przekazywany do modelu.
+- Recenzent wykonuje przegląd z pomocą modelu językowego; nie dowodzi poprawności, bezpieczeństwa ani gotowości produkcyjnej wygenerowanego programu.
+- CodeFabric nie jest usługą wieloużytkownikową ani odizolowanym środowiskiem wykonywania niezaufanego kodu.
+- To ukończony prototyp portfolio, obecnie bez aktywnego rozwoju.
+
+<a id="development-process"></a>
+
+## Sposób tworzenia projektu
+
+CodeFabric powstawał przy wsparciu AI: OpenAI Codex pomagał w planowaniu, implementacji, debugowaniu i przeglądzie. Autor odpowiadał za określanie wymagań, sprawdzanie zmian, uruchamianie aplikacji, testowanie jej zachowania i poprawianie błędów. Codex był narzędziem pracy; działająca aplikacja CodeFabric korzysta z Ollamy.
